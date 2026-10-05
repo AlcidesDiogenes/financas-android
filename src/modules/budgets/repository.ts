@@ -4,47 +4,7 @@ import { Budget } from './types';
 const BUDGETS_STORAGE_KEY = '@financas:budgets_v1';
 
 const getInitialSeedBudgets = (): Budget[] => {
-  if (!__DEV__) {
-    return [];
-  }
-  const now = new Date();
-  const month = now.getMonth() + 1;
-  const year = now.getFullYear();
-
-  return [
-    {
-      id: 'bdg-1',
-      workspaceId: 'ws-solo',
-      category: 'Alimentação',
-      limitAmount: 1200.0,
-      month,
-      year,
-    },
-    {
-      id: 'bdg-2',
-      workspaceId: 'ws-solo',
-      category: 'Transporte',
-      limitAmount: 400.0,
-      month,
-      year,
-    },
-    {
-      id: 'bdg-3',
-      workspaceId: 'ws-solo',
-      category: 'Lazer',
-      limitAmount: 350.0,
-      month,
-      year,
-    },
-    {
-      id: 'bdg-4',
-      workspaceId: 'ws-shared',
-      category: 'Alimentação',
-      limitAmount: 1800.0,
-      month,
-      year,
-    },
-  ];
+  return [];
 };
 
 export class BudgetRepository {
@@ -70,10 +30,8 @@ export class BudgetRepository {
     const all = await this.getAll();
     const existingIndex = all.findIndex(
       (b) =>
-        b.workspaceId === budget.workspaceId &&
-        b.category === budget.category &&
-        b.month === budget.month &&
-        b.year === budget.year
+        b.id === budget.id ||
+        (b.workspaceId === budget.workspaceId && b.category === budget.category)
     );
 
     let updated: Budget[];

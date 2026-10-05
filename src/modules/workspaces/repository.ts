@@ -22,30 +22,6 @@ export const DEFAULT_WORKSPACES: Workspace[] = [
       },
     ],
   },
-  {
-    id: 'ws-shared',
-    name: 'Orçamento Compartilhado',
-    description: 'Espaço compartilhado para casal / família com sincronização.',
-    type: 'shared',
-    inviteCode: 'FIN-7842',
-    createdAt: new Date().toISOString(),
-    members: [
-      {
-        id: 'user-1',
-        name: 'Você',
-        email: 'meu@email.com',
-        role: 'owner',
-        isCurrentUser: true,
-      },
-      {
-        id: 'user-2',
-        name: 'Parceiro(a)',
-        email: 'parceiro@email.com',
-        role: 'editor', // can view and edit
-        isCurrentUser: false,
-      },
-    ],
-  },
 ];
 
 export class WorkspaceRepository {

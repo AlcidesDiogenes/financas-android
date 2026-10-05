@@ -10,6 +10,8 @@ import { Badge } from '../../../core/components/Badge';
 interface RecurringItemProps {
   recurring: RecurringDebit;
   onTogglePaid: (id: string) => void;
+  onEditAmount?: (id: string, currentAmount: number, title: string) => void;
+  onEditFull?: (recurring: RecurringDebit) => void;
   onDelete?: (id: string) => void;
   canEdit?: boolean;
 }
@@ -17,11 +19,32 @@ interface RecurringItemProps {
 export const RecurringItem: React.FC<RecurringItemProps> = ({
   recurring,
   onTogglePaid,
+  onEditAmount,
+  onEditFull,
   onDelete,
   canEdit = true,
 }) => {
   const { theme } = useTheme();
   const meta = getCategoryMeta(recurring.category);
+
+  const vigenciaLabel = React.useMemo(() => {
+    if (!recurring.startDate && !recurring.endDate) return null;
+    const formatYm = (ym: string) => {
+      const parts = ym.split('-');
+      if (parts.length >= 2) return `${parts[1]}/${parts[0]}`;
+      return ym;
+    };
+    if (recurring.startDate && recurring.endDate) {
+      return `${formatYm(recurring.startDate)} até ${formatYm(recurring.endDate)}`;
+    }
+    if (recurring.startDate) {
+      return `A partir de ${formatYm(recurring.startDate)}`;
+    }
+    if (recurring.endDate) {
+      return `Até ${formatYm(recurring.endDate)}`;
+    }
+    return null;
+  }, [recurring.startDate, recurring.endDate]);
 
   return (
     <View
@@ -46,19 +69,51 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
 
         <View style={styles.subInfo}>
           <Text style={[styles.subText, { color: theme.textMuted }]}>
-            Vence todo dia {recurring.dueDay}
+            {recurring.type === 'income' ? 'Recebe todo dia' : 'Vence todo dia'} {recurring.dueDay}
           </Text>
           <Text style={[styles.dot, { color: theme.textMuted }]}>•</Text>
           <Text style={[styles.subText, { color: theme.textMuted }]}>
             {recurring.category}
           </Text>
+          {recurring.assignedTo ? (
+            <>
+              <Text style={[styles.dot, { color: theme.textMuted }]}>•</Text>
+              <Text style={[styles.assignedBadge, { color: theme.primary }]}>
+                👤 {recurring.assignedTo}
+              </Text>
+            </>
+          ) : null}
         </View>
+
+        {vigenciaLabel && (
+          <View style={styles.vigenciaRow}>
+            <Ionicons name="time-outline" size={12} color={theme.textMuted} style={{ marginRight: 3 }} />
+            <Text style={[styles.vigenciaText, { color: theme.textMuted }]}>
+              {vigenciaLabel}
+            </Text>
+          </View>
+        )}
       </View>
 
       <View style={styles.right}>
-        <Text style={[styles.amount, { color: theme.text }]}>
-          {formatCurrency(recurring.amount)}
-        </Text>
+        <TouchableOpacity
+          disabled={!canEdit || !onEditAmount}
+          onPress={() => onEditAmount && onEditAmount(recurring.id, recurring.amount, recurring.title)}
+          style={styles.amountTouchable}
+          hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+        >
+          <Text
+            style={[
+              styles.amount,
+              { color: recurring.type === 'income' ? theme.success : theme.text },
+            ]}
+          >
+            {recurring.type === 'income' ? `+ ${formatCurrency(recurring.amount)}` : formatCurrency(recurring.amount)}
+          </Text>
+          {canEdit && onEditAmount && (
+            <Ionicons name="pencil" size={12} color={theme.textMuted} style={{ marginLeft: 4 }} />
+          )}
+        </TouchableOpacity>
 
         <View style={styles.actionsRow}>
           <TouchableOpacity
@@ -67,10 +122,28 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             style={styles.badgeBtn}
           >
             <Badge
-              label={recurring.isPaidCurrentMonth ? 'Pago' : 'Pendente'}
+              label={
+                recurring.type === 'income'
+                  ? recurring.isPaidCurrentMonth
+                    ? 'Recebido'
+                    : 'A Receber'
+                  : recurring.isPaidCurrentMonth
+                  ? 'Pago'
+                  : 'Pendente'
+              }
               variant={recurring.isPaidCurrentMonth ? 'success' : 'warning'}
             />
           </TouchableOpacity>
+
+          {canEdit && onEditFull && (
+            <TouchableOpacity
+              onPress={() => onEditFull(recurring)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.actionIconBtn}
+            >
+              <Ionicons name="create-outline" size={17} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
 
           {canEdit && onDelete && (
             <TouchableOpacity
@@ -127,6 +200,15 @@ const styles = StyleSheet.create({
     marginHorizontal: 6,
     fontSize: 12,
   },
+  vigenciaRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+  },
+  vigenciaText: {
+    fontSize: 11,
+    fontWeight: '500',
+  },
   right: {
     alignItems: 'flex-end',
     marginLeft: 8,
@@ -136,6 +218,15 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     marginBottom: 4,
   },
+  amountTouchable: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  assignedBadge: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
   actionsRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -143,7 +234,11 @@ const styles = StyleSheet.create({
   badgeBtn: {
     marginRight: 6,
   },
+  actionIconBtn: {
+    padding: 3,
+    marginRight: 4,
+  },
   deleteBtn: {
-    marginLeft: 4,
+    padding: 3,
   },
 });

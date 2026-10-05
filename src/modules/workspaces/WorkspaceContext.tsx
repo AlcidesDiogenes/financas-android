@@ -12,6 +12,8 @@ interface WorkspaceContextType {
   addMember: (workspaceId: string, name: string, email: string, role: WorkspaceRole) => Promise<void>;
   updateMemberRole: (workspaceId: string, memberId: string, role: WorkspaceRole) => Promise<void>;
   removeMember: (workspaceId: string, memberId: string) => Promise<void>;
+  renameWorkspace: (workspaceId: string, newName: string) => Promise<void>;
+  deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; message: string }>;
   joinWorkspaceByCode: (inviteCode: string) => Promise<{ success: boolean; message: string }>;
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
@@ -29,6 +31,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [user?.email]);
 
   const loadWorkspaces = async () => {
+    // No modo offline, permite apenas o espaço pessoal solo
+    if (!user) {
+      const soloList = DEFAULT_WORKSPACES;
+      setWorkspaces(soloList);
+      setActiveWorkspaceIdState(soloList[0].id);
+      return;
+    }
+
     let list = await WorkspaceRepository.getWorkspaces();
     const activeId = await WorkspaceRepository.getActiveWorkspaceId();
 
@@ -250,9 +260,69 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch {}
   };
 
+  const renameWorkspace = async (workspaceId: string, newName: string) => {
+    if (!newName.trim()) return;
+    const cleanName = newName.trim();
+
+    const updated = workspaces.map((w) => {
+      if (w.id === workspaceId) {
+        return { ...w, name: cleanName };
+      }
+      return w;
+    });
+
+    setWorkspaces(updated);
+    await WorkspaceRepository.saveWorkspaces(updated);
+
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspaces').update({ name: cleanName }).eq('id', workspaceId);
+    } catch {}
+  };
+
+  const deleteWorkspace = async (
+    workspaceId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const target = workspaces.find((w) => w.id === workspaceId);
+    if (!target) {
+      return { success: false, message: 'Espaço não encontrado.' };
+    }
+
+    // Regra estrita: O espaço pessoal (solo) nunca pode ser excluído
+    if (target.id === 'ws-solo' || target.type === 'solo') {
+      return { success: false, message: 'O espaço pessoal não pode ser excluído.' };
+    }
+
+    const updated = workspaces.filter((w) => w.id !== workspaceId);
+    if (updated.length === 0) {
+      return { success: false, message: 'Não é possível excluir o único espaço restante.' };
+    }
+
+    // Se o espaço excluído era o ativo, muda para o espaço solo ou o primeiro restante
+    if (activeWorkspaceId === workspaceId) {
+      const fallback = updated.find((w) => w.id === 'ws-solo') || updated[0];
+      await setActiveWorkspace(fallback.id);
+    }
+
+    setWorkspaces(updated);
+    await WorkspaceRepository.saveWorkspaces(updated);
+
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspace_members').delete().eq('workspace_id', workspaceId);
+      await client.from('workspaces').delete().eq('id', workspaceId);
+    } catch {}
+
+    return { success: true, message: 'Espaço excluído com sucesso.' };
+  };
+
   const joinWorkspaceByCode = async (
     inviteCode: string
   ): Promise<{ success: boolean; message: string }> => {
+    if (!user) {
+      return { success: false, message: 'Para entrar em um espaço compartilhado, faça login ou crie uma conta gratuita.' };
+    }
+
     try {
       const client = await SupabaseService.getClient();
       const code = inviteCode.trim().toUpperCase();
@@ -323,6 +393,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         addMember,
         updateMemberRole,
         removeMember,
+        renameWorkspace,
+        deleteWorkspace,
         joinWorkspaceByCode,
         currentUserRole,
         canEdit,

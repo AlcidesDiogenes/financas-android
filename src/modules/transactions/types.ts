@@ -10,6 +10,7 @@ export type TransactionCategory =
   | 'Assinaturas'
   | 'Salário'
   | 'Investimentos'
+  | 'Economia'
   | 'Extra'
   | 'Outros';
 
@@ -23,6 +24,7 @@ export interface Transaction {
   date: string; // ISO date
   notes?: string;
   createdBy?: string;
+  assignedTo?: string; // member name in shared workspace
   isRecurringGenerated?: boolean;
 }
 

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { BudgetProgress } from '../types';
+import { Budget, BudgetProgress } from '../types';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { formatCurrency } from '../../../core/utils/currency';
 import { getCategoryMeta } from '../../../core/utils/categories';
@@ -10,17 +10,19 @@ import { Badge } from '../../../core/components/Badge';
 
 interface BudgetItemProps {
   progress: BudgetProgress;
+  onEdit?: (budget: Budget) => void;
   onDelete?: (id: string) => void;
   canEdit?: boolean;
 }
 
 export const BudgetItem: React.FC<BudgetItemProps> = ({
   progress,
+  onEdit,
   onDelete,
   canEdit = true,
 }) => {
   const { theme } = useTheme();
-  const { budget, spent, remaining, percentage, isExceeded, isWarning } = progress;
+  const { budget, spent, remaining, percentage, isExceeded, isWarning, dailyRemainingBudget } = progress;
   const meta = getCategoryMeta(budget.category);
 
   const getStatusBadge = () => {
@@ -55,16 +57,36 @@ export const BudgetItem: React.FC<BudgetItemProps> = ({
             <Text style={[styles.sub, { color: theme.textMuted }]}>
               Teto: {formatCurrency(budget.limitAmount)}
             </Text>
+            {(budget.startDate || budget.endDate) && (
+              <Text style={[styles.vigenciaText, { color: theme.textMuted }]}>
+                {budget.startDate && budget.endDate
+                  ? `Vigência: ${budget.startDate.split('-')[1]}/${budget.startDate.split('-')[0]} até ${budget.endDate.split('-')[1]}/${budget.endDate.split('-')[0]}`
+                  : budget.startDate
+                  ? `Vigência: a partir de ${budget.startDate.split('-')[1]}/${budget.startDate.split('-')[0]}`
+                  : `Vigência: até ${budget.endDate!.split('-')[1]}/${budget.endDate!.split('-')[0]}`}
+              </Text>
+            )}
           </View>
         </View>
 
         <View style={styles.right}>
           {getStatusBadge()}
+
+          {canEdit && onEdit && (
+            <TouchableOpacity
+              onPress={() => onEdit(budget)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.actionBtn}
+            >
+              <Ionicons name="create-outline" size={17} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
+
           {canEdit && onDelete && (
             <TouchableOpacity
               onPress={() => onDelete(budget.id)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={styles.delBtn}
+              style={styles.actionBtn}
             >
               <Ionicons name="trash-outline" size={16} color={theme.textMuted} />
             </TouchableOpacity>
@@ -92,6 +114,15 @@ export const BudgetItem: React.FC<BudgetItemProps> = ({
             : `Resta ${formatCurrency(remaining)}`}
         </Text>
       </View>
+
+      {!isExceeded && dailyRemainingBudget !== undefined && dailyRemainingBudget > 0 && (
+        <View style={[styles.dailyRow, { borderTopColor: theme.border }]}>
+          <Ionicons name="calendar-outline" size={13} color={theme.textMuted} />
+          <Text style={[styles.dailyText, { color: theme.textMuted }]}>
+            Disponível para gastar: <Text style={{ fontWeight: '700', color: theme.text }}>{formatCurrency(dailyRemainingBudget)}/dia</Text> até o fim do mês
+          </Text>
+        </View>
+      )}
     </View>
   );
 };
@@ -128,12 +159,18 @@ const styles = StyleSheet.create({
     fontSize: 12,
     marginTop: 1,
   },
+  vigenciaText: {
+    fontSize: 11,
+    marginTop: 2,
+    fontWeight: '500',
+  },
   right: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
-  delBtn: {
-    marginLeft: 8,
+  actionBtn: {
+    padding: 4,
   },
   progressContainer: {
     marginVertical: 12,
@@ -145,5 +182,16 @@ const styles = StyleSheet.create({
   },
   bottomText: {
     fontSize: 12,
+  },
+  dailyRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    paddingTop: 8,
+    marginTop: 10,
+    gap: 5,
+  },
+  dailyText: {
+    fontSize: 11,
   },
 });

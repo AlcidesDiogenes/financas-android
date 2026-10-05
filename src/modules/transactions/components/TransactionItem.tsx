@@ -48,6 +48,14 @@ export const TransactionItem: React.FC<TransactionItemProps> = ({
           <Text style={[styles.date, { color: theme.textMuted }]}>
             {formatShortDate(transaction.date)}
           </Text>
+          {transaction.assignedTo ? (
+            <>
+              <Text style={[styles.dot, { color: theme.textMuted }]}>•</Text>
+              <Text style={{ fontSize: 12, fontWeight: '600', color: theme.primary }}>
+                👤 {transaction.assignedTo}
+              </Text>
+            </>
+          ) : null}
         </View>
       </View>
 

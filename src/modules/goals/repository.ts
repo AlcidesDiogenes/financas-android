@@ -74,10 +74,26 @@ export class GoalRepository {
     return updated;
   }
 
+  static async update(goal: Goal): Promise<Goal[]> {
+    const all = await this.getAll();
+    const updated = all.map((g) => (g.id === goal.id ? goal : g));
+    await this.saveAll(updated);
+    return updated;
+  }
+
   static async deposit(id: string, amount: number): Promise<Goal[]> {
     const all = await this.getAll();
     const updated = all.map((g) =>
       g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g
+    );
+    await this.saveAll(updated);
+    return updated;
+  }
+
+  static async withdraw(id: string, amount: number): Promise<Goal[]> {
+    const all = await this.getAll();
+    const updated = all.map((g) =>
+      g.id === id ? { ...g, currentAmount: Math.max(0, g.currentAmount - amount) } : g
     );
     await this.saveAll(updated);
     return updated;

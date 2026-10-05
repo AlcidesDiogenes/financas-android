@@ -16,4 +16,6 @@ export interface GoalProgress {
   percentage: number;
   remainingAmount: number;
   isCompleted: boolean;
+  monthsRemaining: number;
+  monthlyNeeded: number;
 }

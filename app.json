@@ -2,6 +2,7 @@
   "expo": {
     "name": "Finanças",
     "slug": "financas-app",
+    "scheme": "financas",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",

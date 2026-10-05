@@ -18,7 +18,13 @@ import { formatCurrency } from '../core/utils/currency';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
 import { ProgressBar } from '../core/components/ProgressBar';
+import { PeriodSelector } from '../core/components/PeriodSelector';
 import { Ionicons } from '@expo/vector-icons';
+
+import { Budget } from '../modules/budgets/types';
+import { Goal } from '../modules/goals/types';
+import { getMonthLabel } from '../core/utils/date';
+import { Alert } from 'react-native';
 
 export const PlanningScreen: React.FC = () => {
   const { theme } = useTheme();
@@ -26,22 +32,33 @@ export const PlanningScreen: React.FC = () => {
   const {
     budgetProgressList,
     goalProgressList,
+    selectedMonth,
+    selectedYear,
     saveBudget,
     deleteBudget,
     addGoal,
+    updateGoal,
     depositGoal,
+    withdrawGoal,
     deleteGoal,
   } = useFinance();
 
   const [activeTab, setActiveTab] = useState<'budgets' | 'goals'>('budgets');
   const [budgetModalVisible, setBudgetModalVisible] = useState(false);
+  const [editingBudget, setEditingBudget] = useState<Budget | null>(null);
+
   const [goalModalVisible, setGoalModalVisible] = useState(false);
+  const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
 
   const [depositModalVisible, setDepositModalVisible] = useState(false);
   const [selectedGoalForDeposit, setSelectedGoalForDeposit] = useState<{
     id: string;
     title: string;
+    currentAmount: number;
+    mode: 'deposit' | 'withdraw';
   } | null>(null);
+
+  const [goalFilter, setGoalFilter] = useState<'all' | 'active' | 'completed'>('active');
 
   // Overall budget numbers
   const budgetSummary = useMemo(() => {
@@ -51,22 +68,58 @@ export const PlanningScreen: React.FC = () => {
     return { totalLimit, totalSpent, ratio };
   }, [budgetProgressList]);
 
+  // Filtered goals
+  const filteredGoalList = useMemo(() => {
+    if (goalFilter === 'active') {
+      return goalProgressList.filter((g) => !g.isCompleted);
+    }
+    if (goalFilter === 'completed') {
+      return goalProgressList.filter((g) => g.isCompleted);
+    }
+    return goalProgressList;
+  }, [goalProgressList, goalFilter]);
+
   // Overall goal numbers
   const goalSummary = useMemo(() => {
     const totalTarget = goalProgressList.reduce((sum, g) => sum + g.goal.targetAmount, 0);
     const totalCurrent = goalProgressList.reduce((sum, g) => sum + g.goal.currentAmount, 0);
     const ratio = totalTarget > 0 ? totalCurrent / totalTarget : 0;
-    return { totalTarget, totalCurrent, ratio };
+    const completedCount = goalProgressList.filter((g) => g.isCompleted).length;
+    return { totalTarget, totalCurrent, ratio, completedCount };
   }, [goalProgressList]);
 
   const handleOpenDeposit = (goalId: string, currentTitle: string) => {
-    setSelectedGoalForDeposit({ id: goalId, title: currentTitle });
+    const found = goalProgressList.find((g) => g.goal.id === goalId);
+    setSelectedGoalForDeposit({
+      id: goalId,
+      title: currentTitle,
+      currentAmount: found ? found.goal.currentAmount : 0,
+      mode: 'deposit',
+    });
     setDepositModalVisible(true);
   };
 
-  const handleConfirmDeposit = (amount: number) => {
+  const handleOpenWithdraw = (goalId: string, currentTitle: string, currentAmount: number) => {
+    setSelectedGoalForDeposit({
+      id: goalId,
+      title: currentTitle,
+      currentAmount,
+      mode: 'withdraw',
+    });
+    setDepositModalVisible(true);
+  };
+
+  const handleConfirmDepositOrWithdraw = (
+    amount: number,
+    mode: 'deposit' | 'withdraw',
+    createTransaction: boolean
+  ) => {
     if (selectedGoalForDeposit) {
-      depositGoal(selectedGoalForDeposit.id, amount);
+      if (mode === 'deposit') {
+        depositGoal(selectedGoalForDeposit.id, amount, createTransaction);
+      } else {
+        withdrawGoal(selectedGoalForDeposit.id, amount, createTransaction);
+      }
     }
   };
 
@@ -125,10 +178,15 @@ export const PlanningScreen: React.FC = () => {
       >
         {activeTab === 'budgets' ? (
           <>
+            {/* Period Selector */}
+            <View style={{ marginBottom: 12 }}>
+              <PeriodSelector />
+            </View>
+
             {/* Budgets Global Progress Card */}
             <Card variant="elevated" style={styles.headerCard}>
               <Text style={[styles.cardTitle, { color: theme.textMuted }]}>
-                Teto Global Planejado no Mês
+                Teto Global em {getMonthLabel(selectedMonth, selectedYear)}
               </Text>
               <Text style={[styles.cardAmount, { color: theme.text }]}>
                 {formatCurrency(budgetSummary.totalLimit)}
@@ -148,20 +206,22 @@ export const PlanningScreen: React.FC = () => {
               </View>
             </Card>
 
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                Tetos por Categoria ({budgetProgressList.length})
-              </Text>
-              <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                Alertas automáticos para evitar gastos excessivos
-              </Text>
+            <View style={styles.sectionHeaderRow}>
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  Tetos por Categoria ({budgetProgressList.length})
+                </Text>
+                <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
+                  Vigentes em {getMonthLabel(selectedMonth, selectedYear)} com alertas de consumo
+                </Text>
+              </View>
             </View>
 
             {budgetProgressList.length === 0 ? (
               <Card variant="flat" style={{ alignItems: 'center', paddingVertical: 32 }}>
                 <Ionicons name="pie-chart-outline" size={36} color={theme.textMuted} />
                 <Text style={{ color: theme.textMuted, marginTop: 8 }}>
-                  Nenhum orçamento configurado.
+                  Nenhum orçamento vigente em {getMonthLabel(selectedMonth, selectedYear)}.
                 </Text>
               </Card>
             ) : (
@@ -169,6 +229,10 @@ export const PlanningScreen: React.FC = () => {
                 <BudgetItem
                   key={item.budget.id}
                   progress={item}
+                  onEdit={(b) => {
+                    setEditingBudget(b);
+                    setBudgetModalVisible(true);
+                  }}
                   onDelete={deleteBudget}
                   canEdit={canEdit}
                 />
@@ -180,7 +244,7 @@ export const PlanningScreen: React.FC = () => {
             {/* Goals Global Progress Card */}
             <Card variant="elevated" style={styles.headerCard}>
               <Text style={[styles.cardTitle, { color: theme.textMuted }]}>
-                Progresso Geral das Metas
+                Progresso Geral de Metas
               </Text>
               <Text style={[styles.cardAmount, { color: theme.text }]}>
                 {formatCurrency(goalSummary.totalCurrent)}
@@ -200,28 +264,92 @@ export const PlanningScreen: React.FC = () => {
               </View>
             </Card>
 
-            <View style={styles.sectionHeader}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                Metas Ativas ({goalProgressList.length})
-              </Text>
-              <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                Faça aportes e acompanhe suas conquistas
-              </Text>
+            {/* Filter Pills for Goals */}
+            <View style={styles.goalFilterRow}>
+              <TouchableOpacity
+                style={[
+                  styles.goalFilterPill,
+                  {
+                    backgroundColor:
+                      goalFilter === 'active' ? theme.primary : theme.surfaceVariant,
+                  },
+                ]}
+                onPress={() => setGoalFilter('active')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.goalFilterText,
+                    { color: goalFilter === 'active' ? '#FFF' : theme.text },
+                  ]}
+                >
+                  Em Andamento ({goalProgressList.filter((g) => !g.isCompleted).length})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.goalFilterPill,
+                  {
+                    backgroundColor:
+                      goalFilter === 'completed' ? theme.primary : theme.surfaceVariant,
+                  },
+                ]}
+                onPress={() => setGoalFilter('completed')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.goalFilterText,
+                    { color: goalFilter === 'completed' ? '#FFF' : theme.text },
+                  ]}
+                >
+                  Concluídas 🎉 ({goalSummary.completedCount})
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                style={[
+                  styles.goalFilterPill,
+                  {
+                    backgroundColor:
+                      goalFilter === 'all' ? theme.primary : theme.surfaceVariant,
+                  },
+                ]}
+                onPress={() => setGoalFilter('all')}
+                activeOpacity={0.7}
+              >
+                <Text
+                  style={[
+                    styles.goalFilterText,
+                    { color: goalFilter === 'all' ? '#FFF' : theme.text },
+                  ]}
+                >
+                  Todas ({goalProgressList.length})
+                </Text>
+              </TouchableOpacity>
             </View>
 
-            {goalProgressList.length === 0 ? (
+            {filteredGoalList.length === 0 ? (
               <Card variant="flat" style={{ alignItems: 'center', paddingVertical: 32 }}>
                 <Ionicons name="flag-outline" size={36} color={theme.textMuted} />
                 <Text style={{ color: theme.textMuted, marginTop: 8 }}>
-                  Nenhuma meta cadastrada ainda.
+                  {goalFilter === 'completed'
+                    ? 'Nenhuma meta concluída ainda. Continue poupando!'
+                    : 'Nenhuma meta cadastrada ainda.'}
                 </Text>
               </Card>
             ) : (
-              goalProgressList.map((item) => (
+              filteredGoalList.map((item) => (
                 <GoalItem
                   key={item.goal.id}
                   progress={item}
                   onDeposit={handleOpenDeposit}
+                  onWithdraw={handleOpenWithdraw}
+                  onEdit={(g) => {
+                    setEditingGoal(g);
+                    setGoalModalVisible(true);
+                  }}
                   onDelete={deleteGoal}
                   canEdit={canEdit}
                 />
@@ -239,8 +367,10 @@ export const PlanningScreen: React.FC = () => {
             icon={<Ionicons name="add" size={20} color="#FFF" />}
             onPress={() => {
               if (activeTab === 'budgets') {
+                setEditingBudget(null);
                 setBudgetModalVisible(true);
               } else {
+                setEditingGoal(null);
                 setGoalModalVisible(true);
               }
             }}
@@ -252,14 +382,33 @@ export const PlanningScreen: React.FC = () => {
       {/* Modals */}
       <AddBudgetModal
         visible={budgetModalVisible}
-        onClose={() => setBudgetModalVisible(false)}
+        initialData={editingBudget}
+        onClose={() => {
+          setBudgetModalVisible(false);
+          setEditingBudget(null);
+        }}
         onSubmit={saveBudget}
       />
 
       <AddGoalModal
         visible={goalModalVisible}
-        onClose={() => setGoalModalVisible(false)}
-        onSubmit={(data) => addGoal(data, data.initialAmount)}
+        initialData={editingGoal}
+        onClose={() => {
+          setGoalModalVisible(false);
+          setEditingGoal(null);
+        }}
+        onSubmit={async (data) => {
+          if (editingGoal) {
+            await updateGoal({
+              ...editingGoal,
+              ...data,
+            });
+          } else {
+            await addGoal(data, data.initialAmount);
+          }
+          setGoalModalVisible(false);
+          setEditingGoal(null);
+        }}
       />
 
       <DepositGoalModal
@@ -269,7 +418,9 @@ export const PlanningScreen: React.FC = () => {
           setSelectedGoalForDeposit(null);
         }}
         goalTitle={selectedGoalForDeposit?.title || ''}
-        onSubmit={handleConfirmDeposit}
+        initialMode={selectedGoalForDeposit?.mode || 'deposit'}
+        maxWithdrawAmount={selectedGoalForDeposit?.currentAmount || 0}
+        onSubmit={handleConfirmDepositOrWithdraw}
       />
     </View>
   );
@@ -326,7 +477,10 @@ const styles = StyleSheet.create({
   cardBottomText: {
     fontSize: 12,
   },
-  sectionHeader: {
+  sectionHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'flex-start',
     marginBottom: 12,
   },
   sectionTitle: {
@@ -336,6 +490,20 @@ const styles = StyleSheet.create({
   sectionSubtitle: {
     fontSize: 12,
     marginTop: 2,
+  },
+  goalFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 16,
+  },
+  goalFilterPill: {
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderRadius: 20,
+  },
+  goalFilterText: {
+    fontSize: 12,
+    fontWeight: '700',
   },
   fabWrap: {
     position: 'absolute',

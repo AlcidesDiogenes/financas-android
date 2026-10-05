@@ -52,6 +52,11 @@ export const CATEGORIES_META: Record<TransactionCategory, CategoryMeta> = {
     icon: 'trending-up-outline',
     color: '#14B8A6',
   },
+  Economia: {
+    name: 'Economia',
+    icon: 'wallet-outline',
+    color: '#3B82F6',
+  },
   Extra: {
     name: 'Extra',
     icon: 'gift-outline',

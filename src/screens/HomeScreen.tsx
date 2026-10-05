@@ -14,12 +14,13 @@ import { formatCurrency } from '../core/utils/currency';
 import { getMonthLabel } from '../core/utils/date';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
-import { Badge } from '../core/components/Badge';
 import { TransactionItem } from '../modules/transactions/components/TransactionItem';
 import { RecurringItem } from '../modules/recurrings/components/RecurringItem';
+import { isRecurringActiveInMonth } from '../modules/recurrings/types';
 import { BudgetItem } from '../modules/budgets/components/BudgetItem';
 import { SpendingCharts } from '../core/components/SpendingCharts';
 import { AddTransactionModal } from '../modules/transactions/components/AddTransactionModal';
+import { PeriodSelector } from '../core/components/PeriodSelector';
 import { Ionicons } from '@expo/vector-icons';
 
 interface HomeScreenProps {
@@ -55,8 +56,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   } = useFinance();
 
   const [addModalVisible, setAddModalVisible] = useState(false);
+  const [addModalInitialMode, setAddModalInitialMode] = useState<'expense' | 'income' | 'saving'>('expense');
 
-  const pendingRecurrings = recurrings.filter((r) => !r.isPaidCurrentMonth);
+  const handleOpenAddModal = (mode: 'expense' | 'income' | 'saving' = 'expense') => {
+    if (!canEdit) return;
+    setAddModalInitialMode(mode);
+    setAddModalVisible(true);
+  };
+
+  const pendingRecurrings = recurrings
+    .filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear))
+    .filter((r) => !r.isPaidCurrentMonth);
   const recentTransactions = transactions.slice(0, 4);
 
   const categorySpendings = useMemo(() => {
@@ -136,15 +146,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Month Title */}
+        {/* Month Navigator */}
         <View style={styles.periodRow}>
-          <Text style={[styles.periodText, { color: theme.text }]}>
-            {getMonthLabel(selectedMonth, selectedYear)}
-          </Text>
-          <Badge
-            label={activeWorkspace.type === 'solo' ? 'Privado' : 'Colaborativo'}
-            variant={activeWorkspace.type === 'solo' ? 'neutral' : 'info'}
-          />
+          <PeriodSelector compact />
         </View>
 
         {/* Hero Card: Balance & Summary */}
@@ -161,11 +165,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             {formatPrivateCurrency(monthlySummary.balance, formatCurrency(monthlySummary.balance))}
           </Text>
 
-          {/* Income & Expense Row */}
+          {/* Income, Expense & Savings Row */}
           <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
-            <View style={styles.statCol}>
+            <TouchableOpacity
+              style={styles.statCol}
+              activeOpacity={0.7}
+              onPress={() => handleOpenAddModal('income')}
+              disabled={!canEdit}
+            >
               <View style={styles.statIconRow}>
-                <Ionicons name="arrow-down-circle" size={16} color={theme.success} />
+                <Ionicons name="arrow-down-circle" size={15} color={theme.success} />
                 <Text style={[styles.statLabel, { color: theme.textMuted }]}>
                   Receitas
                 </Text>
@@ -173,13 +182,18 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <Text style={[styles.statValue, { color: theme.success }]}>
                 {formatPrivateCurrency(monthlySummary.totalIncome, formatCurrency(monthlySummary.totalIncome))}
               </Text>
-            </View>
+            </TouchableOpacity>
 
             <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
 
-            <View style={styles.statCol}>
+            <TouchableOpacity
+              style={styles.statCol}
+              activeOpacity={0.7}
+              onPress={() => handleOpenAddModal('expense')}
+              disabled={!canEdit}
+            >
               <View style={styles.statIconRow}>
-                <Ionicons name="arrow-up-circle" size={16} color={theme.danger} />
+                <Ionicons name="arrow-up-circle" size={15} color={theme.danger} />
                 <Text style={[styles.statLabel, { color: theme.textMuted }]}>
                   Despesas
                 </Text>
@@ -187,7 +201,26 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <Text style={[styles.statValue, { color: theme.danger }]}>
                 {formatPrivateCurrency(monthlySummary.totalExpense, formatCurrency(monthlySummary.totalExpense))}
               </Text>
-            </View>
+            </TouchableOpacity>
+
+            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+
+            <TouchableOpacity
+              style={styles.statCol}
+              activeOpacity={0.7}
+              onPress={() => handleOpenAddModal('saving')}
+              disabled={!canEdit}
+            >
+              <View style={styles.statIconRow}>
+                <Ionicons name="wallet-outline" size={15} color="#3B82F6" />
+                <Text style={[styles.statLabel, { color: theme.textMuted }]}>
+                  Economia
+                </Text>
+              </View>
+              <Text style={[styles.statValue, { color: '#3B82F6' }]}>
+                {formatPrivateCurrency(monthlySummary.totalSavedInMonth, formatCurrency(monthlySummary.totalSavedInMonth))}
+              </Text>
+            </TouchableOpacity>
           </View>
 
           {/* Projected Balance Alert Box */}
@@ -213,7 +246,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             <Button
               title="Novo Lançamento"
               icon={<Ionicons name="add-circle" size={18} color="#FFF" />}
-              onPress={() => setAddModalVisible(true)}
+              onPress={() => handleOpenAddModal('expense')}
               style={{ flex: 1 }}
             />
           </View>
@@ -314,6 +347,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       {/* Add Transaction Modal */}
       <AddTransactionModal
         visible={addModalVisible}
+        initialMode={addModalInitialMode}
         onClose={() => setAddModalVisible(false)}
         onSubmit={addTransaction}
       />

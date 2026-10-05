@@ -4,6 +4,7 @@ import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
 import { useTheme } from '../../../core/theme/ThemeContext';
+import { Goal } from '../types';
 import { Ionicons } from '@expo/vector-icons';
 
 interface AddGoalModalProps {
@@ -18,6 +19,7 @@ interface AddGoalModalProps {
     color: string;
     notes?: string;
   }) => void;
+  initialData?: Goal | null;
 }
 
 const GOAL_ICONS = [
@@ -34,6 +36,7 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
   visible,
   onClose,
   onSubmit,
+  initialData,
 }) => {
   const { theme } = useTheme();
 
@@ -41,8 +44,39 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
   const [targetAmountStr, setTargetAmountStr] = useState('');
   const [initialAmountStr, setInitialAmountStr] = useState('');
   const [monthsAhead, setMonthsAhead] = useState('12');
+  const [notes, setNotes] = useState('');
   const [selectedIconIndex, setSelectedIconIndex] = useState(0);
   const [error, setError] = useState('');
+
+  React.useEffect(() => {
+    if (initialData) {
+      setTitle(initialData.title);
+      setTargetAmountStr(initialData.targetAmount.toString());
+      setInitialAmountStr(initialData.currentAmount.toString());
+      setNotes(initialData.notes || '');
+
+      // Calculate months ahead from deadlineDate
+      const deadline = new Date(initialData.deadlineDate);
+      const today = new Date();
+      const diffMonths = Math.max(
+        1,
+        (deadline.getFullYear() - today.getFullYear()) * 12 +
+          (deadline.getMonth() - today.getMonth())
+      );
+      setMonthsAhead(diffMonths.toString());
+
+      const foundIdx = GOAL_ICONS.findIndex((i) => i.icon === initialData.icon);
+      setSelectedIconIndex(foundIdx >= 0 ? foundIdx : 0);
+    } else {
+      setTitle('');
+      setTargetAmountStr('');
+      setInitialAmountStr('');
+      setMonthsAhead('12');
+      setNotes('');
+      setSelectedIconIndex(0);
+    }
+    setError('');
+  }, [initialData, visible]);
 
   const handleSave = () => {
     if (!title.trim()) {
@@ -70,14 +104,9 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
       deadlineDate: deadline.toISOString(),
       icon: GOAL_ICONS[selectedIconIndex].icon,
       color: GOAL_ICONS[selectedIconIndex].color,
+      notes: notes.trim() ? notes.trim() : undefined,
     });
 
-    // Reset
-    setTitle('');
-    setTargetAmountStr('');
-    setInitialAmountStr('');
-    setMonthsAhead('12');
-    setSelectedIconIndex(0);
     onClose();
   };
 
@@ -85,7 +114,7 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
     <ModalContainer
       visible={visible}
       onClose={onClose}
-      title="Nova Meta Financeira"
+      title={initialData ? `Editar Meta: ${initialData.title}` : 'Nova Meta Financeira'}
     >
       <Input
         label="Nome da Meta"
@@ -155,8 +184,15 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
         })}
       </View>
 
+      <Input
+        label="Observações / Estratégia (opcional)"
+        placeholder="Ex: Guardar em CDB 100% ou Tesouro Selic"
+        value={notes}
+        onChangeText={setNotes}
+      />
+
       <Button
-        title="Criar Meta Financeira"
+        title={initialData ? 'Salvar Alterações' : 'Criar Meta Financeira'}
         onPress={handleSave}
         style={{ marginTop: 8 }}
       />

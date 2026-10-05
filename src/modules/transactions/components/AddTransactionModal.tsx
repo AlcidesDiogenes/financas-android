@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,6 +10,7 @@ import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
 import { useTheme } from '../../../core/theme/ThemeContext';
+import { useWorkspace } from '../../workspaces/WorkspaceContext';
 import { TransactionCategory, TransactionType } from '../types';
 import { CATEGORIES_META } from '../../../core/utils/categories';
 import { Ionicons } from '@expo/vector-icons';
@@ -17,17 +18,19 @@ import { Ionicons } from '@expo/vector-icons';
 interface AddTransactionModalProps {
   visible: boolean;
   onClose: () => void;
+  initialMode?: 'expense' | 'income' | 'saving';
   onSubmit: (data: {
     title: string;
     amount: number;
     type: TransactionType;
     category: TransactionCategory;
     date: string;
+    assignedTo?: string;
     notes?: string;
   }) => void;
 }
 
-const CATEGORIES: TransactionCategory[] = [
+const EXPENSE_CATEGORIES: TransactionCategory[] = [
   'Alimentação',
   'Moradia',
   'Transporte',
@@ -35,29 +38,65 @@ const CATEGORIES: TransactionCategory[] = [
   'Saúde',
   'Educação',
   'Assinaturas',
+  'Outros',
+];
+
+const INCOME_CATEGORIES: TransactionCategory[] = [
   'Salário',
   'Investimentos',
   'Extra',
   'Outros',
 ];
 
+const SAVING_CATEGORIES: TransactionCategory[] = [
+  'Economia',
+  'Investimentos',
+  'Outros',
+];
+
 export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   visible,
   onClose,
+  initialMode = 'expense',
   onSubmit,
 }) => {
   const { theme } = useTheme();
+  const { activeWorkspace } = useWorkspace();
 
+  const [entryMode, setEntryMode] = useState<'expense' | 'income' | 'saving'>(initialMode);
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [type, setType] = useState<TransactionType>('expense');
   const [category, setCategory] = useState<TransactionCategory>('Alimentação');
+  const [assignedTo, setAssignedTo] = useState<string>('');
   const [notes, setNotes] = useState('');
   const [error, setError] = useState('');
 
+  useEffect(() => {
+    if (visible) {
+      const mode = initialMode || 'expense';
+      setEntryMode(mode);
+      if (mode === 'saving') {
+        setType('expense');
+        setCategory('Economia');
+      } else if (mode === 'income') {
+        setType('income');
+        setCategory('Salário');
+      } else {
+        setType('expense');
+        setCategory('Alimentação');
+      }
+      setError('');
+    }
+  }, [visible, initialMode]);
+
   const handleSave = () => {
     if (!title.trim()) {
-      setError('Informe a descrição do lançamento');
+      setError(
+        entryMode === 'saving'
+          ? 'Informe onde guardou o dinheiro (ex: Poupança, Banco)'
+          : 'Informe a descrição do lançamento'
+      );
       return;
     }
 
@@ -74,42 +113,60 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
       type,
       category,
       date: new Date().toISOString(),
+      assignedTo: assignedTo.trim() || undefined,
       notes: notes.trim() || undefined,
     });
 
     // Reset form
     setTitle('');
     setAmountStr('');
-    setType('expense');
-    setCategory('Alimentação');
+    setAssignedTo('');
     setNotes('');
     onClose();
   };
+
+  const isShared = activeWorkspace.type === 'shared';
+  const categoriesList =
+    entryMode === 'saving'
+      ? SAVING_CATEGORIES
+      : entryMode === 'income'
+      ? INCOME_CATEGORIES
+      : EXPENSE_CATEGORIES;
 
   return (
     <ModalContainer
       visible={visible}
       onClose={onClose}
-      title="Novo Lançamento"
+      title={
+        entryMode === 'saving'
+          ? 'Nova Economia / Guardado'
+          : entryMode === 'income'
+          ? 'Nova Receita'
+          : 'Nova Despesa'
+      }
     >
-      {/* Type Toggle: Despesa vs Receita */}
+      {/* Type Toggle: Despesa vs Receita vs Economia */}
       <View style={[styles.typeContainer, { backgroundColor: theme.surfaceVariant }]}>
         <TouchableOpacity
           style={[
             styles.typeButton,
-            type === 'expense' && { backgroundColor: theme.danger },
+            entryMode === 'expense' && { backgroundColor: theme.danger },
           ]}
-          onPress={() => setType('expense')}
+          onPress={() => {
+            setEntryMode('expense');
+            setType('expense');
+            setCategory('Alimentação');
+          }}
         >
           <Ionicons
             name="arrow-down-circle"
-            size={18}
-            color={type === 'expense' ? '#FFF' : theme.textMuted}
+            size={16}
+            color={entryMode === 'expense' ? '#FFF' : theme.textMuted}
           />
           <Text
             style={[
               styles.typeText,
-              { color: type === 'expense' ? '#FFF' : theme.textMuted },
+              { color: entryMode === 'expense' ? '#FFF' : theme.textMuted },
             ]}
           >
             Despesa
@@ -119,32 +176,71 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         <TouchableOpacity
           style={[
             styles.typeButton,
-            type === 'income' && { backgroundColor: theme.success },
+            entryMode === 'income' && { backgroundColor: theme.success },
           ]}
           onPress={() => {
+            setEntryMode('income');
             setType('income');
-            if (category === 'Alimentação') setCategory('Salário');
+            setCategory('Salário');
           }}
         >
           <Ionicons
             name="arrow-up-circle"
-            size={18}
-            color={type === 'income' ? '#FFF' : theme.textMuted}
+            size={16}
+            color={entryMode === 'income' ? '#FFF' : theme.textMuted}
           />
           <Text
             style={[
               styles.typeText,
-              { color: type === 'income' ? '#FFF' : theme.textMuted },
+              { color: entryMode === 'income' ? '#FFF' : theme.textMuted },
             ]}
           >
             Receita
           </Text>
         </TouchableOpacity>
+
+        <TouchableOpacity
+          style={[
+            styles.typeButton,
+            entryMode === 'saving' && { backgroundColor: '#3B82F6' },
+          ]}
+          onPress={() => {
+            setEntryMode('saving');
+            setType('expense');
+            setCategory('Economia');
+          }}
+        >
+          <Ionicons
+            name="wallet"
+            size={16}
+            color={entryMode === 'saving' ? '#FFF' : theme.textMuted}
+          />
+          <Text
+            style={[
+              styles.typeText,
+              { color: entryMode === 'saving' ? '#FFF' : theme.textMuted },
+            ]}
+          >
+            Economia
+          </Text>
+        </TouchableOpacity>
       </View>
 
       <Input
-        label="Descrição"
-        placeholder="Ex: Supermercado, Salário, Uber"
+        label={
+          entryMode === 'saving'
+            ? 'Onde guardou? (Banco / Poupança)'
+            : entryMode === 'income'
+            ? 'Origem da Receita'
+            : 'Descrição da Despesa'
+        }
+        placeholder={
+          entryMode === 'saving'
+            ? 'Ex: Guardado no Banco, Poupança, Caixinha Nubank'
+            : entryMode === 'income'
+            ? 'Ex: Salário, Venda, Pix Recebido, Extra'
+            : 'Ex: Supermercado, Farmácia, Gasolina, Uber'
+        }
         value={title}
         onChangeText={setTitle}
       />
@@ -155,8 +251,52 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         keyboardType="decimal-pad"
         value={amountStr}
         onChangeText={setAmountStr}
-        error={error}
       />
+
+      {/* Responsável - Apenas se o espaço for Compartilhado */}
+      {isShared && activeWorkspace.members.length > 0 && (
+        <View style={{ marginBottom: 14 }}>
+          <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
+            Quem pagou / guardou?
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false}>
+            {activeWorkspace.members.map((m) => {
+              const isSelected = assignedTo === m.name;
+              return (
+                <TouchableOpacity
+                  key={m.id}
+                  style={[
+                    styles.memberChip,
+                    {
+                      backgroundColor: isSelected ? theme.primary : theme.surfaceVariant,
+                      borderColor: isSelected ? theme.primary : theme.border,
+                    },
+                  ]}
+                  onPress={() => setAssignedTo(isSelected ? '' : m.name)}
+                >
+                  <Ionicons
+                    name="person"
+                    size={14}
+                    color={isSelected ? '#FFF' : theme.text}
+                  />
+                  <Text
+                    style={[
+                      styles.memberChipText,
+                      { color: isSelected ? '#FFF' : theme.text },
+                    ]}
+                  >
+                    {m.name}
+                  </Text>
+                </TouchableOpacity>
+              );
+            })}
+          </ScrollView>
+        </View>
+      )}
+
+      {error ? (
+        <Text style={[styles.error, { color: theme.danger }]}>{error}</Text>
+      ) : null}
 
       <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
         Categoria
@@ -166,7 +306,7 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         showsHorizontalScrollIndicator={false}
         contentContainerStyle={styles.categoryList}
       >
-        {CATEGORIES.map((cat) => {
+        {categoriesList.map((cat) => {
           const isSelected = category === cat;
           const meta = CATEGORIES_META[cat];
           return (
@@ -201,13 +341,23 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
       <Input
         label="Observações (Opcional)"
-        placeholder="Detalhes adicionais..."
+        placeholder={
+          entryMode === 'saving'
+            ? 'Ex: Reserva de emergência, rendimento a 100% do CDI'
+            : 'Detalhes adicionais...'
+        }
         value={notes}
         onChangeText={setNotes}
       />
 
       <Button
-        title="Salvar Lançamento"
+        title={
+          entryMode === 'saving'
+            ? 'Salvar Economia Guardada'
+            : entryMode === 'income'
+            ? 'Cadastrar Receita'
+            : 'Cadastrar Despesa'
+        }
         onPress={handleSave}
         style={{ marginTop: 12 }}
       />
@@ -233,7 +383,12 @@ const styles = StyleSheet.create({
   typeText: {
     marginLeft: 6,
     fontWeight: '700',
-    fontSize: 14,
+    fontSize: 13,
+  },
+  error: {
+    fontSize: 13,
+    fontWeight: '500',
+    marginBottom: 12,
   },
   sectionLabel: {
     fontSize: 13,
@@ -256,5 +411,19 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 13,
     fontWeight: '600',
+  },
+  memberChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    borderWidth: 1,
+    marginRight: 8,
+  },
+  memberChipText: {
+    marginLeft: 6,
+    fontSize: 12,
+    fontWeight: '700',
   },
 });

@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
-import { GoalProgress } from '../types';
+import { Goal, GoalProgress } from '../types';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { formatCurrency } from '../../../core/utils/currency';
 import { formatShortDate } from '../../../core/utils/date';
@@ -11,6 +11,8 @@ import { Badge } from '../../../core/components/Badge';
 interface GoalItemProps {
   progress: GoalProgress;
   onDeposit: (goalId: string, currentTitle: string) => void;
+  onWithdraw?: (goalId: string, currentTitle: string, currentAmount: number) => void;
+  onEdit?: (goal: Goal) => void;
   onDelete?: (id: string) => void;
   canEdit?: boolean;
 }
@@ -18,11 +20,13 @@ interface GoalItemProps {
 export const GoalItem: React.FC<GoalItemProps> = ({
   progress,
   onDeposit,
+  onWithdraw,
+  onEdit,
   onDelete,
   canEdit = true,
 }) => {
   const { theme } = useTheme();
-  const { goal, percentage, remainingAmount, isCompleted } = progress;
+  const { goal, percentage, remainingAmount, isCompleted, monthsRemaining, monthlyNeeded } = progress;
 
   return (
     <View
@@ -44,7 +48,7 @@ export const GoalItem: React.FC<GoalItemProps> = ({
               {goal.title}
             </Text>
             <Text style={[styles.deadline, { color: theme.textMuted }]}>
-              Meta até {formatShortDate(goal.deadlineDate)}
+              Meta até {formatShortDate(goal.deadlineDate)} ({monthsRemaining} {monthsRemaining === 1 ? 'mês' : 'meses'})
             </Text>
           </View>
         </View>
@@ -56,11 +60,21 @@ export const GoalItem: React.FC<GoalItemProps> = ({
             <Badge label={`${percentage}%`} variant="info" />
           )}
 
+          {canEdit && onEdit && (
+            <TouchableOpacity
+              onPress={() => onEdit(goal)}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              style={styles.actionBtn}
+            >
+              <Ionicons name="create-outline" size={17} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
+
           {canEdit && onDelete && (
             <TouchableOpacity
               onPress={() => onDelete(goal.id)}
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-              style={styles.delBtn}
+              style={styles.actionBtn}
             >
               <Ionicons name="trash-outline" size={16} color={theme.textMuted} />
             </TouchableOpacity>
@@ -80,6 +94,15 @@ export const GoalItem: React.FC<GoalItemProps> = ({
           </Text>
         </View>
 
+        {!isCompleted && monthlyNeeded > 0 && (
+          <View style={{ alignItems: 'center' }}>
+            <Text style={[styles.numLabel, { color: theme.textMuted }]}>Esforço Mensal</Text>
+            <Text style={[styles.numValue, { color: theme.primary }]}>
+              {formatCurrency(monthlyNeeded)}/mês
+            </Text>
+          </View>
+        )}
+
         <View style={{ alignItems: 'flex-end' }}>
           <Text style={[styles.numLabel, { color: theme.textMuted }]}>Objetivo</Text>
           <Text style={[styles.numValue, { color: theme.text }]}>
@@ -88,17 +111,40 @@ export const GoalItem: React.FC<GoalItemProps> = ({
         </View>
       </View>
 
-      {/* Quick Deposit Button */}
-      {canEdit && !isCompleted && (
-        <TouchableOpacity
-          style={[styles.depositBtn, { backgroundColor: theme.surfaceVariant }]}
-          onPress={() => onDeposit(goal.id, goal.title)}
-        >
-          <Ionicons name="add-circle-outline" size={18} color={theme.primary} />
-          <Text style={[styles.depositBtnText, { color: theme.primary }]}>
-            Fazer Aporte nesta Meta
+      {goal.notes ? (
+        <View style={[styles.notesWrap, { backgroundColor: theme.surfaceVariant }]}>
+          <Ionicons name="information-circle-outline" size={14} color={theme.textMuted} />
+          <Text style={[styles.notesText, { color: theme.textMuted }]} numberOfLines={2}>
+            {goal.notes}
           </Text>
-        </TouchableOpacity>
+        </View>
+      ) : null}
+
+      {/* Action Buttons */}
+      {canEdit && (
+        <View style={styles.btnRow}>
+          <TouchableOpacity
+            style={[styles.depositBtn, { backgroundColor: theme.primary, flex: 1 }]}
+            onPress={() => onDeposit(goal.id, goal.title)}
+          >
+            <Ionicons name="arrow-down-circle" size={16} color="#FFF" />
+            <Text style={[styles.depositBtnText, { color: '#FFF' }]}>
+              Guardar / Aporte
+            </Text>
+          </TouchableOpacity>
+
+          {goal.currentAmount > 0 && onWithdraw && (
+            <TouchableOpacity
+              style={[styles.depositBtn, { backgroundColor: theme.surfaceVariant, flex: 1 }]}
+              onPress={() => onWithdraw(goal.id, goal.title, goal.currentAmount)}
+            >
+              <Ionicons name="arrow-up-circle" size={16} color={theme.text} />
+              <Text style={[styles.depositBtnText, { color: theme.text }]}>
+                Resgatar
+              </Text>
+            </TouchableOpacity>
+          )}
+        </View>
       )}
     </View>
   );
@@ -141,9 +187,10 @@ const styles = StyleSheet.create({
   right: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
-  delBtn: {
-    marginLeft: 8,
+  actionBtn: {
+    padding: 4,
   },
   progressContainer: {
     marginVertical: 14,
@@ -160,6 +207,22 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: '700',
     marginTop: 2,
+  },
+  notesWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 8,
+    borderRadius: 8,
+    marginBottom: 12,
+    gap: 6,
+  },
+  notesText: {
+    fontSize: 12,
+    flex: 1,
+  },
+  btnRow: {
+    flexDirection: 'row',
+    gap: 8,
   },
   depositBtn: {
     flexDirection: 'row',
