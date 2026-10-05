@@ -27,6 +27,7 @@ export const WorkspacesScreen: React.FC = () => {
     addMember,
     updateMemberRole,
     removeMember,
+    joinWorkspaceByCode,
     currentUserRole,
   } = useWorkspace();
 
@@ -35,6 +36,10 @@ export const WorkspacesScreen: React.FC = () => {
   const [newWsName, setNewWsName] = useState('');
   const [newWsDesc, setNewWsDesc] = useState('');
   const [newWsIsShared, setNewWsIsShared] = useState(true);
+
+  // Join Workspace Modal
+  const [joinModalVisible, setJoinModalVisible] = useState(false);
+  const [joinCode, setJoinCode] = useState('');
 
   // Add Member Modal
   const [memberModalVisible, setMemberModalVisible] = useState(false);
@@ -50,6 +55,18 @@ export const WorkspacesScreen: React.FC = () => {
     setNewWsName('');
     setNewWsDesc('');
     setCreateModalVisible(false);
+  };
+
+  const handleJoinWorkspace = async () => {
+    if (!joinCode.trim()) return;
+    const res = await joinWorkspaceByCode(joinCode.trim());
+    if (res.success) {
+      Alert.alert('Sucesso!', res.message);
+      setJoinCode('');
+      setJoinModalVisible(false);
+    } else {
+      Alert.alert('Aviso', res.message);
+    }
   };
 
   const handleAddMember = async () => {
@@ -154,13 +171,22 @@ export const WorkspacesScreen: React.FC = () => {
           );
         })}
 
-        <Button
-          title="Criar Novo Espaço"
-          variant="outline"
-          icon={<Ionicons name="add-circle-outline" size={18} color={theme.text} />}
-          onPress={() => setCreateModalVisible(true)}
-          style={{ marginBottom: 24 }}
-        />
+        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 24 }}>
+          <Button
+            title="Criar Novo Espaço"
+            variant="outline"
+            icon={<Ionicons name="add-circle-outline" size={18} color={theme.text} />}
+            onPress={() => setCreateModalVisible(true)}
+            style={{ flex: 1 }}
+          />
+          <Button
+            title="Entrar com Código"
+            variant="secondary"
+            icon={<Ionicons name="key-outline" size={18} color={theme.text} />}
+            onPress={() => setJoinModalVisible(true)}
+            style={{ flex: 1 }}
+          />
+        </View>
 
         {/* Active Workspace Collaborators & Permissions Management */}
         {activeWorkspace.type === 'shared' && (
@@ -390,6 +416,26 @@ export const WorkspacesScreen: React.FC = () => {
           title="Conceder Acesso"
           onPress={handleAddMember}
           style={{ marginTop: 12 }}
+        />
+      </ModalContainer>
+
+      {/* Join Workspace Modal */}
+      <ModalContainer
+        visible={joinModalVisible}
+        onClose={() => setJoinModalVisible(false)}
+        title="Entrar em um Espaço"
+      >
+        <Input
+          label="Código do Convite"
+          placeholder="Ex: FIN-7842"
+          autoCapitalize="characters"
+          value={joinCode}
+          onChangeText={setJoinCode}
+        />
+        <Button
+          title="Vincular Espaço"
+          onPress={handleJoinWorkspace}
+          style={{ marginTop: 8 }}
         />
       </ModalContainer>
     </View>

@@ -1,6 +1,8 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Workspace, WorkspaceMember, WorkspaceRole } from './types';
 import { WorkspaceRepository, DEFAULT_WORKSPACES } from './repository';
+import { useAuth } from '../../services/auth/AuthContext';
+import { SupabaseService } from '../../services/supabase/supabaseClient';
 
 interface WorkspaceContextType {
   workspaces: Workspace[];
@@ -10,6 +12,7 @@ interface WorkspaceContextType {
   addMember: (workspaceId: string, name: string, email: string, role: WorkspaceRole) => Promise<void>;
   updateMemberRole: (workspaceId: string, memberId: string, role: WorkspaceRole) => Promise<void>;
   removeMember: (workspaceId: string, memberId: string) => Promise<void>;
+  joinWorkspaceByCode: (inviteCode: string) => Promise<{ success: boolean; message: string }>;
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
 }
@@ -17,16 +20,66 @@ interface WorkspaceContextType {
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
 
 export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const [workspaces, setWorkspaces] = useState<Workspace[]>(DEFAULT_WORKSPACES);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string>(DEFAULT_WORKSPACES[0].id);
 
   useEffect(() => {
     loadWorkspaces();
-  }, []);
+  }, [user?.email]);
 
   const loadWorkspaces = async () => {
-    const list = await WorkspaceRepository.getWorkspaces();
+    let list = await WorkspaceRepository.getWorkspaces();
     const activeId = await WorkspaceRepository.getActiveWorkspaceId();
+
+    // If user is authenticated, check for email invitations in Supabase
+    if (user?.email) {
+      try {
+        const client = await SupabaseService.getClient();
+        const { data: memberRows } = await client
+          .from('workspace_members')
+          .select('workspace_id, role, name, email')
+          .eq('email', user.email.toLowerCase().trim());
+
+        if (memberRows && memberRows.length > 0) {
+          const workspaceIds = memberRows.map((m) => m.workspace_id);
+          const { data: remoteWorkspaces } = await client
+            .from('workspaces')
+            .select('*')
+            .in('id', workspaceIds);
+
+          if (remoteWorkspaces) {
+            remoteWorkspaces.forEach((rw) => {
+              const alreadyHas = list.some((w) => w.id === rw.id);
+              if (!alreadyHas) {
+                const memberInfo = memberRows.find((m) => m.workspace_id === rw.id);
+                const role: WorkspaceRole = (memberInfo?.role as WorkspaceRole) || 'editor';
+
+                list.push({
+                  id: rw.id,
+                  name: rw.name,
+                  description: rw.description || '',
+                  type: rw.type as any,
+                  inviteCode: rw.invite_code || '',
+                  createdAt: rw.created_at,
+                  members: [
+                    {
+                      id: `member-${user.id}`,
+                      name: user.name || 'Você',
+                      email: user.email,
+                      role,
+                      isCurrentUser: true,
+                    },
+                  ],
+                });
+              }
+            });
+            await WorkspaceRepository.saveWorkspaces(list);
+          }
+        }
+      } catch {}
+    }
+
     setWorkspaces(list);
     const found = list.find((w) => w.id === activeId);
     if (found) {
@@ -39,7 +92,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const activeWorkspace =
     workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0] || DEFAULT_WORKSPACES[0];
 
-  const currentMember = activeWorkspace.members.find((m) => m.isCurrentUser);
+  const currentMember = activeWorkspace.members.find(
+    (m) => m.isCurrentUser || (user?.email && m.email.toLowerCase() === user.email.toLowerCase())
+  );
   const currentUserRole: WorkspaceRole = currentMember ? currentMember.role : 'owner';
   const canEdit = currentUserRole === 'owner' || currentUserRole === 'editor';
 
@@ -53,6 +108,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     description: string,
     isShared: boolean
   ) => {
+    const ownerEmail = user?.email || 'meu@email.com';
+    const ownerName = user?.name || 'Você';
+
     const newWs: Workspace = {
       id: `ws-${Date.now()}`,
       name,
@@ -63,8 +121,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       members: [
         {
           id: `user-${Date.now()}`,
-          name: 'Você',
-          email: 'meu@email.com',
+          name: ownerName,
+          email: ownerEmail,
           role: 'owner',
           isCurrentUser: true,
         },
@@ -75,6 +133,26 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     setWorkspaces(updated);
     await WorkspaceRepository.saveWorkspaces(updated);
     await setActiveWorkspace(newWs.id);
+
+    // Save to cloud in background
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspaces').upsert({
+        id: newWs.id,
+        name: newWs.name,
+        description: newWs.description,
+        type: newWs.type,
+        invite_code: newWs.inviteCode,
+        created_at: newWs.createdAt,
+      });
+      await client.from('workspace_members').upsert({
+        id: `mem-${newWs.id}-owner`,
+        workspace_id: newWs.id,
+        email: ownerEmail.toLowerCase(),
+        name: ownerName,
+        role: 'owner',
+      });
+    } catch {}
   };
 
   const addMember = async (
@@ -83,15 +161,17 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     email: string,
     role: WorkspaceRole
   ) => {
+    const cleanEmail = email.trim().toLowerCase();
+    const newMember: WorkspaceMember = {
+      id: `user-${Date.now()}`,
+      name: name.trim(),
+      email: cleanEmail,
+      role,
+      isCurrentUser: false,
+    };
+
     const updated = workspaces.map((w) => {
       if (w.id === workspaceId) {
-        const newMember: WorkspaceMember = {
-          id: `user-${Date.now()}`,
-          name,
-          email,
-          role,
-          isCurrentUser: false,
-        };
         return {
           ...w,
           members: [...w.members, newMember],
@@ -102,6 +182,18 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setWorkspaces(updated);
     await WorkspaceRepository.saveWorkspaces(updated);
+
+    // Persist invitation in Supabase so the recipient gets connected when logging in
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspace_members').upsert({
+        id: newMember.id,
+        workspace_id: workspaceId,
+        email: cleanEmail,
+        name: name.trim(),
+        role,
+      });
+    } catch {}
   };
 
   const updateMemberRole = async (
@@ -109,11 +201,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     memberId: string,
     role: WorkspaceRole
   ) => {
+    let targetMember: WorkspaceMember | undefined;
+
     const updated = workspaces.map((w) => {
       if (w.id === workspaceId) {
         return {
           ...w,
-          members: w.members.map((m) => (m.id === memberId ? { ...m, role } : m)),
+          members: w.members.map((m) => {
+            if (m.id === memberId) {
+              targetMember = { ...m, role };
+              return targetMember;
+            }
+            return m;
+          }),
         };
       }
       return w;
@@ -121,6 +221,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setWorkspaces(updated);
     await WorkspaceRepository.saveWorkspaces(updated);
+
+    if (targetMember) {
+      try {
+        const client = await SupabaseService.getClient();
+        await client.from('workspace_members').update({ role }).eq('id', memberId);
+      } catch {}
+    }
   };
 
   const removeMember = async (workspaceId: string, memberId: string) => {
@@ -136,6 +243,74 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setWorkspaces(updated);
     await WorkspaceRepository.saveWorkspaces(updated);
+
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspace_members').delete().eq('id', memberId);
+    } catch {}
+  };
+
+  const joinWorkspaceByCode = async (
+    inviteCode: string
+  ): Promise<{ success: boolean; message: string }> => {
+    try {
+      const client = await SupabaseService.getClient();
+      const code = inviteCode.trim().toUpperCase();
+
+      const { data, error } = await client
+        .from('workspaces')
+        .select('*')
+        .eq('invite_code', code)
+        .single();
+
+      if (error || !data) {
+        return { success: false, message: 'Código de convite não encontrado.' };
+      }
+
+      const alreadyExists = workspaces.some((w) => w.id === data.id);
+      if (alreadyExists) {
+        await setActiveWorkspace(data.id);
+        return { success: true, message: 'Você já faz parte deste espaço!' };
+      }
+
+      const joinedWs: Workspace = {
+        id: data.id,
+        name: data.name,
+        description: data.description || '',
+        type: data.type as any,
+        inviteCode: data.invite_code,
+        createdAt: data.created_at,
+        members: [
+          {
+            id: `user-${Date.now()}`,
+            name: user?.name || 'Você',
+            email: user?.email || 'meu@email.com',
+            role: 'editor',
+            isCurrentUser: true,
+          },
+        ],
+      };
+
+      const updated = [...workspaces, joinedWs];
+      setWorkspaces(updated);
+      await WorkspaceRepository.saveWorkspaces(updated);
+      await setActiveWorkspace(joinedWs.id);
+
+      // Register membership in Supabase
+      if (user?.email) {
+        await client.from('workspace_members').upsert({
+          id: `mem-${Date.now()}`,
+          workspace_id: data.id,
+          email: user.email.toLowerCase().trim(),
+          name: user.name || 'Você',
+          role: 'editor',
+        });
+      }
+
+      return { success: true, message: `Conectado com sucesso ao espaço "${data.name}"!` };
+    } catch (e: any) {
+      return { success: false, message: e?.message || 'Erro ao conectar ao espaço.' };
+    }
   };
 
   return (
@@ -148,6 +323,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         addMember,
         updateMemberRole,
         removeMember,
+        joinWorkspaceByCode,
         currentUserRole,
         canEdit,
       }}

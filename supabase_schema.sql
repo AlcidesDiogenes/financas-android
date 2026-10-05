@@ -13,6 +13,16 @@ CREATE TABLE IF NOT EXISTS public.workspaces (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 1.1 Tabela de Membros dos Espaços (Vinculação por E-mail)
+CREATE TABLE IF NOT EXISTS public.workspace_members (
+    id TEXT PRIMARY KEY,
+    workspace_id TEXT REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    email TEXT NOT NULL,
+    name TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'editor', -- 'owner', 'editor', 'viewer'
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- 2. Tabela de Transações (Receitas e Despesas)
 CREATE TABLE IF NOT EXISTS public.transactions (
     id TEXT PRIMARY KEY,
@@ -72,18 +82,21 @@ CREATE TABLE IF NOT EXISTS public.goals (
 -- Permite que o app leia e salve dados utilizando a chave pública (publishable)
 -- ==============================================================================
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.transactions ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recurrings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.budgets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.goals ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Permitir workspaces" ON public.workspaces;
+DROP POLICY IF EXISTS "Permitir workspace_members" ON public.workspace_members;
 DROP POLICY IF EXISTS "Permitir transactions" ON public.transactions;
 DROP POLICY IF EXISTS "Permitir recurrings" ON public.recurrings;
 DROP POLICY IF EXISTS "Permitir budgets" ON public.budgets;
 DROP POLICY IF EXISTS "Permitir goals" ON public.goals;
 
 CREATE POLICY "Permitir workspaces" ON public.workspaces FOR ALL USING (true) WITH CHECK (true);
+CREATE POLICY "Permitir workspace_members" ON public.workspace_members FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permitir transactions" ON public.transactions FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permitir recurrings" ON public.recurrings FOR ALL USING (true) WITH CHECK (true);
 CREATE POLICY "Permitir budgets" ON public.budgets FOR ALL USING (true) WITH CHECK (true);
@@ -94,6 +107,7 @@ CREATE POLICY "Permitir goals" ON public.goals FOR ALL USING (true) WITH CHECK (
 -- Permite que quando uma pessoa cadastrar uma conta, atualize na hora no outro celular
 -- ==============================================================================
 ALTER PUBLICATION supabase_realtime ADD TABLE public.workspaces;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.workspace_members;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.transactions;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.recurrings;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.budgets;

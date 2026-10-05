@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
 } from 'react-native';
 import { useTheme } from '../core/theme/ThemeContext';
+import { useAuth } from '../services/auth/AuthContext';
 import { useSecurity } from '../services/security/SecurityContext';
 import { SupabaseService } from '../services/supabase/supabaseClient';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
@@ -23,6 +24,7 @@ import { Ionicons } from '@expo/vector-icons';
 
 export const SettingsScreen: React.FC = () => {
   const { theme, isDark, toggleTheme } = useTheme();
+  const { user, signOut } = useAuth();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
   const { transactions, selectedMonth, selectedYear, reloadAll, wipeAllData } = useFinance();
 
@@ -97,6 +99,36 @@ export const SettingsScreen: React.FC = () => {
         <Text style={[styles.headerSubtitle, { color: theme.textMuted }]}>
           Segurança, sincronização em nuvem e relatórios
         </Text>
+
+        {/* User Profile Card */}
+        <Card variant="elevated" style={styles.card}>
+          <View style={styles.cardHeader}>
+            <View style={[styles.cloudIconWrap, { backgroundColor: theme.primaryLight }]}>
+              <Ionicons name="person" size={24} color={theme.primary} />
+            </View>
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={[styles.cardTitle, { color: theme.text }]}>
+                {user ? user.name : 'Modo Offline'}
+              </Text>
+              <Text style={[styles.itemSub, { color: theme.textMuted }]}>
+                {user ? user.email : 'Sem conta vinculada'}
+              </Text>
+            </View>
+            {user ? (
+              <TouchableOpacity
+                onPress={() => {
+                  Alert.alert('Sair da Conta', 'Deseja realmente desconectar da sua conta?', [
+                    { text: 'Cancelar', style: 'cancel' },
+                    { text: 'Sair', style: 'destructive', onPress: signOut },
+                  ]);
+                }}
+                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              >
+                <Ionicons name="log-out-outline" size={24} color={theme.danger} />
+              </TouchableOpacity>
+            ) : null}
+          </View>
+        </Card>
 
         {/* Cloud Sync Status (No exposed keys) */}
         <Card variant="elevated" style={styles.card}>
