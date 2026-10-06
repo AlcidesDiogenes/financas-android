@@ -14,7 +14,7 @@ export interface ReleaseNote {
 
 export const APP_VERSION_CONFIG = {
   version: '1.3.7',
-  buildNumber: 10,
+  buildNumber: 11,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -27,11 +27,16 @@ export const getAppVersionString = (): string => {
 export const RELEASE_HISTORY: ReleaseNote[] = [
   {
     version: '1.3.7',
-    buildNumber: 10,
+    buildNumber: 11,
     date: '06/10/2026',
     title: 'Saldo Previsto, Gestão de Espaços e Melhorias Visuais ✨',
-    highlight: 'Modo de saldo e subtotais previstos, regras de membros nos espaços e novas validações.',
+    highlight: 'Modo de saldo previsto, modal moderno de gestão de membros e novas validações.',
     changes: [
+      {
+        icon: 'people-outline',
+        title: 'Novo Modal de Gestão de Membros',
+        description: 'Substituição dos diálogos nativos do sistema por um modal moderno, com perfil do participante, cards explicativos de permissão e transferência segura.',
+      },
       {
         icon: 'calculator-outline',
         title: 'Saldo Real vs Previsto Total Dinâmico',

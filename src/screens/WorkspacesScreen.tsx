@@ -68,6 +68,16 @@ export const WorkspacesScreen: React.FC = () => {
   const [memberNameError, setMemberNameError] = useState('');
   const [memberEmailError, setMemberEmailError] = useState('');
 
+  // Manage Member Modal
+  const [selectedMemberToManage, setSelectedMemberToManage] = useState<{
+    id: string;
+    name: string;
+    email: string;
+    role: WorkspaceRole;
+  } | null>(null);
+  const [manageStep, setManageStep] = useState<'options' | 'transfer' | 'remove'>('options');
+  const [isManagingLoading, setIsManagingLoading] = useState(false);
+
   const isSolo = activeWorkspace.type === 'solo';
 
   const handleShareCode = async () => {
@@ -187,60 +197,50 @@ export const WorkspacesScreen: React.FC = () => {
 
   const handleManageMemberRole = (member: { id: string; name: string; email: string; role: WorkspaceRole }) => {
     if (currentUserRole !== 'owner') return;
-
-    Alert.alert(
-      `Permissões de ${member.name}`,
-      `Escolha o nível de acesso ou transfira a titularidade do espaço:`,
-      [
-        {
-          text: member.role === 'editor' ? 'Mudar para: Apenas Ver 👁️' : 'Mudar para: Pode Editar ✏️',
-          onPress: async () => {
-            const nextRole: WorkspaceRole = member.role === 'editor' ? 'viewer' : 'editor';
-            await updateMemberRole(activeWorkspace.id, member.id, nextRole);
-          },
-        },
-        {
-          text: '👑 Transferir Propriedade',
-          onPress: () => {
-            Alert.alert(
-              'Transferir Propriedade do Espaço?',
-              `Deseja transferir a titularidade de "${activeWorkspace.name}" para ${member.name} (${member.email})?\n\nVocê deixará de ser o proprietário e passará a ser um membro editor. Apenas o novo proprietário poderá gerenciar o espaço ou excluí-lo.`,
-              [
-                { text: 'Cancelar', style: 'cancel' },
-                {
-                  text: 'Confirmar Transferência',
-                  style: 'destructive',
-                  onPress: async () => {
-                    const res = await transferOwnership(activeWorkspace.id, member.email);
-                    if (res.success) {
-                      Alert.alert('Sucesso 🎉', res.message);
-                    } else {
-                      Alert.alert('Aviso', res.message);
-                    }
-                  },
-                },
-              ]
-            );
-          },
-        },
-        { text: 'Cancelar', style: 'cancel' },
-      ]
-    );
+    setSelectedMemberToManage(member);
+    setManageStep('options');
   };
 
-  const handleConfirmRemoveMember = (memberId: string, memberName: string) => {
-    Alert.alert(
-      'Remover Membro',
-      `Deseja remover o acesso de ${memberName} deste espaço?`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Remover',
-          style: 'destructive',
-          onPress: () => removeMember(activeWorkspace.id, memberId),
-        },
-      ]
-    );
+  const handleConfirmRemoveMember = (member: { id: string; name: string; email: string; role: WorkspaceRole }) => {
+    if (currentUserRole !== 'owner') return;
+    setSelectedMemberToManage(member);
+    setManageStep('remove');
+  };
+
+  const handleCloseManageMember = () => {
+    setSelectedMemberToManage(null);
+    setManageStep('options');
+    setIsManagingLoading(false);
+  };
+
+  const handleToggleMemberRole = async () => {
+    if (!selectedMemberToManage) return;
+    setIsManagingLoading(true);
+    const nextRole: WorkspaceRole = selectedMemberToManage.role === 'editor' ? 'viewer' : 'editor';
+    await updateMemberRole(activeWorkspace.id, selectedMemberToManage.id, nextRole);
+    setIsManagingLoading(false);
+    handleCloseManageMember();
+  };
+
+  const handleConfirmTransfer = async () => {
+    if (!selectedMemberToManage) return;
+    setIsManagingLoading(true);
+    const res = await transferOwnership(activeWorkspace.id, selectedMemberToManage.email);
+    setIsManagingLoading(false);
+    handleCloseManageMember();
+    if (res.success) {
+      Alert.alert('Sucesso 🎉', res.message);
+    } else {
+      Alert.alert('Aviso', res.message);
+    }
+  };
+
+  const handleConfirmRemove = async () => {
+    if (!selectedMemberToManage) return;
+    setIsManagingLoading(true);
+    await removeMember(activeWorkspace.id, selectedMemberToManage.id);
+    setIsManagingLoading(false);
+    handleCloseManageMember();
   };
 
   return (
@@ -534,7 +534,7 @@ export const WorkspacesScreen: React.FC = () => {
 
                       {currentUserRole === 'owner' && !isYou && member.role !== 'owner' && (
                         <TouchableOpacity
-                          onPress={() => handleConfirmRemoveMember(member.id, member.name)}
+                          onPress={() => handleConfirmRemoveMember(member)}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                           style={{ marginLeft: 8 }}
                         >
@@ -847,6 +847,269 @@ export const WorkspacesScreen: React.FC = () => {
         />
       </ModalContainer>
 
+      {/* Modal Gerenciar Membro / Permissões (Substitui o Alert nativo do Android) */}
+      <ModalContainer
+        visible={!!selectedMemberToManage}
+        onClose={handleCloseManageMember}
+        title={
+          manageStep === 'transfer'
+            ? 'Transferir Titularidade'
+            : manageStep === 'remove'
+            ? 'Remover Membro'
+            : selectedMemberToManage
+            ? `Permissões: ${selectedMemberToManage.name}`
+            : 'Gerenciar Membro'
+        }
+      >
+        {selectedMemberToManage && (
+          <View style={{ gap: 14 }}>
+            {/* Card de Identificação do Membro */}
+            <View
+              style={[
+                styles.manageMemberProfileCard,
+                { backgroundColor: theme.surfaceVariant, borderColor: theme.border },
+              ]}
+            >
+              <View
+                style={[
+                  styles.manageMemberAvatar,
+                  { backgroundColor: `${theme.primary}20` },
+                ]}
+              >
+                <Text style={[styles.manageMemberAvatarText, { color: theme.primary }]}>
+                  {(selectedMemberToManage.name.charAt(0) || 'U').toUpperCase()}
+                </Text>
+              </View>
+              <View style={{ flex: 1, minWidth: 0 }}>
+                <Text style={[styles.manageMemberName, { color: theme.text }]} numberOfLines={1}>
+                  {selectedMemberToManage.name}
+                </Text>
+                <Text style={[styles.manageMemberEmail, { color: theme.textMuted }]} numberOfLines={1}>
+                  {selectedMemberToManage.email}
+                </Text>
+              </View>
+              <Badge
+                label={selectedMemberToManage.role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️'}
+                variant={selectedMemberToManage.role === 'editor' ? 'success' : 'neutral'}
+              />
+            </View>
+
+            {manageStep === 'options' && (
+              <>
+                <Text style={[styles.manageSectionTitle, { color: theme.textMuted }]}>
+                  Escolha o nível de acesso ou função:
+                </Text>
+
+                {/* Opção 1: Alternar Permissão */}
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={isManagingLoading}
+                  onPress={handleToggleMemberRole}
+                  style={[
+                    styles.manageActionCard,
+                    {
+                      backgroundColor: theme.surface,
+                      borderColor: theme.border,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.manageActionIconWrap,
+                      {
+                        backgroundColor:
+                          selectedMemberToManage.role === 'editor'
+                            ? '#3B82F618'
+                            : '#10B98118',
+                      },
+                    ]}
+                  >
+                    <Ionicons
+                      name={
+                        selectedMemberToManage.role === 'editor'
+                          ? 'eye-outline'
+                          : 'create-outline'
+                      }
+                      size={22}
+                      color={
+                        selectedMemberToManage.role === 'editor'
+                          ? '#3B82F6'
+                          : '#10B981'
+                      }
+                    />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.manageActionTitle, { color: theme.text }]}>
+                      {selectedMemberToManage.role === 'editor'
+                        ? 'Mudar para: Apenas Ver 👁️'
+                        : 'Mudar para: Pode Editar ✏️'}
+                    </Text>
+                    <Text style={[styles.manageActionDesc, { color: theme.textMuted }]}>
+                      {selectedMemberToManage.role === 'editor'
+                        ? 'O participante só poderá ver extratos e gráficos, sem fazer lançamentos.'
+                        : 'O participante terá permissão total para criar e editar transações.'}
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={theme.textMuted} />
+                </TouchableOpacity>
+
+                {/* Opção 2: Transferir Propriedade */}
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={isManagingLoading}
+                  onPress={() => setManageStep('transfer')}
+                  style={[
+                    styles.manageActionCard,
+                    {
+                      backgroundColor: '#F59E0B0D',
+                      borderColor: '#F59E0B40',
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.manageActionIconWrap,
+                      { backgroundColor: '#F59E0B20' },
+                    ]}
+                  >
+                    <Ionicons name="ribbon-outline" size={22} color="#D97706" />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.manageActionTitle, { color: '#B45309' }]}>
+                      👑 Transferir Propriedade
+                    </Text>
+                    <Text style={[styles.manageActionDesc, { color: theme.textMuted }]}>
+                      Passar a titularidade oficial do espaço para {selectedMemberToManage.name}.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color="#D97706" />
+                </TouchableOpacity>
+
+                {/* Opção 3: Remover Membro */}
+                <TouchableOpacity
+                  activeOpacity={0.7}
+                  disabled={isManagingLoading}
+                  onPress={() => setManageStep('remove')}
+                  style={[
+                    styles.manageActionCard,
+                    {
+                      backgroundColor: `${theme.danger}0A`,
+                      borderColor: `${theme.danger}30`,
+                    },
+                  ]}
+                >
+                  <View
+                    style={[
+                      styles.manageActionIconWrap,
+                      { backgroundColor: `${theme.danger}18` },
+                    ]}
+                  >
+                    <Ionicons name="person-remove-outline" size={22} color={theme.danger} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.manageActionTitle, { color: theme.danger }]}>
+                      Remover do Espaço
+                    </Text>
+                    <Text style={[styles.manageActionDesc, { color: theme.textMuted }]}>
+                      Revogar o acesso deste participante a este espaço compartilhado.
+                    </Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={18} color={theme.danger} />
+                </TouchableOpacity>
+
+                <Button
+                  title="Cancelar"
+                  variant="outline"
+                  onPress={handleCloseManageMember}
+                  style={{ marginTop: 4 }}
+                />
+              </>
+            )}
+
+            {manageStep === 'transfer' && (
+              <View style={{ gap: 12 }}>
+                <View
+                  style={[
+                    styles.warningBox,
+                    {
+                      backgroundColor: '#F59E0B12',
+                      borderColor: '#F59E0B40',
+                    },
+                  ]}
+                >
+                  <Ionicons name="warning-outline" size={24} color="#D97706" />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.warningBoxTitle, { color: '#B45309' }]}>
+                      Atenção à mudança de dono!
+                    </Text>
+                    <Text style={[styles.warningBoxDesc, { color: theme.text }]}>
+                      Você deixará de ser o proprietário do espaço "{activeWorkspace.name}" e passará a ser um membro editor.
+                      {'\n\n'}
+                      Apenas <Text style={{ fontWeight: '700' }}>{selectedMemberToManage.name}</Text> poderá gerenciar novos membros ou excluir este espaço.
+                    </Text>
+                  </View>
+                </View>
+
+                <Button
+                  title={isManagingLoading ? 'Transferindo...' : 'Confirmar Transferência 👑'}
+                  variant="primary"
+                  onPress={handleConfirmTransfer}
+                  disabled={isManagingLoading}
+                  style={{ backgroundColor: '#D97706', borderColor: '#D97706' }}
+                />
+
+                <Button
+                  title="Voltar"
+                  variant="outline"
+                  onPress={() => setManageStep('options')}
+                  disabled={isManagingLoading}
+                />
+              </View>
+            )}
+
+            {manageStep === 'remove' && (
+              <View style={{ gap: 12 }}>
+                <View
+                  style={[
+                    styles.warningBox,
+                    {
+                      backgroundColor: `${theme.danger}10`,
+                      borderColor: `${theme.danger}30`,
+                    },
+                  ]}
+                >
+                  <Ionicons name="alert-circle-outline" size={24} color={theme.danger} />
+                  <View style={{ flex: 1 }}>
+                    <Text style={[styles.warningBoxTitle, { color: theme.danger }]}>
+                      Remover Participante
+                    </Text>
+                    <Text style={[styles.warningBoxDesc, { color: theme.text }]}>
+                      Tem certeza que deseja remover o acesso de <Text style={{ fontWeight: '700' }}>{selectedMemberToManage.name}</Text> deste espaço?
+                      {'\n\n'}
+                      A pessoa perderá o acesso aos lançamentos imediatamente.
+                    </Text>
+                  </View>
+                </View>
+
+                <Button
+                  title={isManagingLoading ? 'Removendo...' : 'Sim, Remover Acesso'}
+                  variant="danger"
+                  onPress={handleConfirmRemove}
+                  disabled={isManagingLoading}
+                />
+
+                <Button
+                  title="Voltar"
+                  variant="outline"
+                  onPress={() => setManageStep('options')}
+                  disabled={isManagingLoading}
+                />
+              </View>
+            )}
+          </View>
+        )}
+      </ModalContainer>
+
       {/* Modal de Login / Cadastro para usuário Offline */}
       <Modal
         visible={showAuthModal}
@@ -1127,5 +1390,80 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginLeft: 6,
+  },
+  manageMemberProfileCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 12,
+  },
+  manageMemberAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manageMemberAvatarText: {
+    fontSize: 18,
+    fontWeight: '800',
+  },
+  manageMemberName: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  manageMemberEmail: {
+    fontSize: 12,
+    marginTop: 2,
+  },
+  manageSectionTitle: {
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginTop: 4,
+  },
+  manageActionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 12,
+  },
+  manageActionIconWrap: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  manageActionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  manageActionDesc: {
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  warningBox: {
+    flexDirection: 'row',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 12,
+    alignItems: 'flex-start',
+  },
+  warningBoxTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 4,
+  },
+  warningBoxDesc: {
+    fontSize: 12,
+    lineHeight: 18,
   },
 });
