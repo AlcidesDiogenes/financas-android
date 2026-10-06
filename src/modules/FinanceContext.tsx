@@ -26,6 +26,7 @@ interface FinanceContextType {
   goals: Goal[];
   goalProgressList: GoalProgress[];
   monthlySummary: MonthlySummary & { totalSavedInMonth: number };
+  projectedIncome: number;
   projectedExpense: number;
   projectedBalance: number;
   balanceMode: BalanceMode;
@@ -228,8 +229,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       .reduce((sum, r) => sum + r.amount, 0);
   }, [recurrings, selectedMonth, selectedYear]);
 
-  const projectedExpense = monthlySummary.totalExpense + monthlySummary.totalSavedInMonth + pendingRecurringExpense;
-  const projectedBalance = (monthlySummary.totalIncome + pendingRecurringIncome) - projectedExpense;
+  const projectedIncome = monthlySummary.totalIncome + pendingRecurringIncome;
+  const projectedExpense = monthlySummary.totalExpense + pendingRecurringExpense;
+  const projectedBalance = projectedIncome - projectedExpense - monthlySummary.totalSavedInMonth;
 
   // Budget progress against current month expenses
   const budgetProgressList: BudgetProgress[] = useMemo(() => {
@@ -611,6 +613,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         goals,
         goalProgressList,
         monthlySummary,
+        projectedIncome,
         projectedExpense,
         projectedBalance,
         balanceMode,

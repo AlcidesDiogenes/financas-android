@@ -43,6 +43,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const { activeWorkspace, canEdit } = useWorkspace();
   const {
     monthlySummary,
+    projectedIncome,
     projectedExpense,
     projectedBalance,
     balanceMode,
@@ -225,62 +226,69 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           })()}
 
           {/* Income, Expense & Savings Row */}
-          <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
-            <TouchableOpacity
-              style={styles.statCol}
-              activeOpacity={0.7}
-              onPress={() => handleOpenAddModal('income')}
-              disabled={!canEdit}
-            >
-              <View style={styles.statIconRow}>
-                <Ionicons name="arrow-down-circle" size={15} color={theme.success} />
-                <Text style={[styles.statLabel, { color: theme.textMuted }]}>
-                  Receitas
-                </Text>
+          {(() => {
+            const displayIncome = balanceMode === 'projected' ? projectedIncome : monthlySummary.totalIncome;
+            const displayExpense = balanceMode === 'projected' ? projectedExpense : monthlySummary.totalExpense;
+
+            return (
+              <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
+                <TouchableOpacity
+                  style={styles.statCol}
+                  activeOpacity={0.7}
+                  onPress={() => handleOpenAddModal('income')}
+                  disabled={!canEdit}
+                >
+                  <View style={styles.statIconRow}>
+                    <Ionicons name="arrow-down-circle" size={15} color={theme.success} />
+                    <Text style={[styles.statLabel, { color: theme.textMuted }]}>
+                      Receitas
+                    </Text>
+                  </View>
+                  <Text style={[styles.statValue, { color: theme.success }]}>
+                    {formatPrivateCurrency(displayIncome, formatCurrency(displayIncome))}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+
+                <TouchableOpacity
+                  style={styles.statCol}
+                  activeOpacity={0.7}
+                  onPress={() => handleOpenAddModal('expense')}
+                  disabled={!canEdit}
+                >
+                  <View style={styles.statIconRow}>
+                    <Ionicons name="arrow-up-circle" size={15} color={theme.danger} />
+                    <Text style={[styles.statLabel, { color: theme.textMuted }]}>
+                      Despesas
+                    </Text>
+                  </View>
+                  <Text style={[styles.statValue, { color: theme.danger }]}>
+                    {formatPrivateCurrency(displayExpense, formatCurrency(displayExpense))}
+                  </Text>
+                </TouchableOpacity>
+
+                <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
+
+                <TouchableOpacity
+                  style={styles.statCol}
+                  activeOpacity={0.7}
+                  onPress={() => handleOpenAddModal('saving')}
+                  disabled={!canEdit}
+                >
+                  <View style={styles.statIconRow}>
+                    <Ionicons name="wallet-outline" size={15} color="#3B82F6" />
+                    <Text style={[styles.statLabel, { color: theme.textMuted }]}>
+                      Economia
+                    </Text>
+                  </View>
+                  <Text style={[styles.statValue, { color: '#3B82F6' }]}>
+                    {formatPrivateCurrency(monthlySummary.totalSavedInMonth, formatCurrency(monthlySummary.totalSavedInMonth))}
+                  </Text>
+                </TouchableOpacity>
               </View>
-              <Text style={[styles.statValue, { color: theme.success }]}>
-                {formatPrivateCurrency(monthlySummary.totalIncome, formatCurrency(monthlySummary.totalIncome))}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-
-            <TouchableOpacity
-              style={styles.statCol}
-              activeOpacity={0.7}
-              onPress={() => handleOpenAddModal('expense')}
-              disabled={!canEdit}
-            >
-              <View style={styles.statIconRow}>
-                <Ionicons name="arrow-up-circle" size={15} color={theme.danger} />
-                <Text style={[styles.statLabel, { color: theme.textMuted }]}>
-                  Despesas
-                </Text>
-              </View>
-              <Text style={[styles.statValue, { color: theme.danger }]}>
-                {formatPrivateCurrency(monthlySummary.totalExpense, formatCurrency(monthlySummary.totalExpense))}
-              </Text>
-            </TouchableOpacity>
-
-            <View style={[styles.statDivider, { backgroundColor: theme.border }]} />
-
-            <TouchableOpacity
-              style={styles.statCol}
-              activeOpacity={0.7}
-              onPress={() => handleOpenAddModal('saving')}
-              disabled={!canEdit}
-            >
-              <View style={styles.statIconRow}>
-                <Ionicons name="wallet-outline" size={15} color="#3B82F6" />
-                <Text style={[styles.statLabel, { color: theme.textMuted }]}>
-                  Economia
-                </Text>
-              </View>
-              <Text style={[styles.statValue, { color: '#3B82F6' }]}>
-                {formatPrivateCurrency(monthlySummary.totalSavedInMonth, formatCurrency(monthlySummary.totalSavedInMonth))}
-              </Text>
-            </TouchableOpacity>
-          </View>
+            );
+          })()}
 
           {/* Context Footer Box */}
           {balanceMode === 'realized' ? (

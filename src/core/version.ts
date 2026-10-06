@@ -14,7 +14,7 @@ export interface ReleaseNote {
 
 export const APP_VERSION_CONFIG = {
   version: '1.3.7',
-  buildNumber: 9,
+  buildNumber: 10,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -27,15 +27,15 @@ export const getAppVersionString = (): string => {
 export const RELEASE_HISTORY: ReleaseNote[] = [
   {
     version: '1.3.7',
-    buildNumber: 9,
+    buildNumber: 10,
     date: '06/10/2026',
     title: 'Saldo Previsto, Gestão de Espaços e Melhorias Visuais ✨',
-    highlight: 'Modo de saldo previsto, regras de membros nos espaços e novas validações.',
+    highlight: 'Modo de saldo e subtotais previstos, regras de membros nos espaços e novas validações.',
     changes: [
       {
         icon: 'calculator-outline',
-        title: 'Saldo Real vs Previsto Total',
-        description: 'Alterne rapidamente no card principal entre Saldo Real de Caixa ou Saldo Previsto Planejado.',
+        title: 'Saldo Real vs Previsto Total Dinâmico',
+        description: 'No modo Previsto, os cards de Saldo, Receitas e Despesas agora calculam dinamicamente todas as entradas e saídas planejadas do mês.',
       },
       {
         icon: 'people-outline',
