@@ -24,11 +24,12 @@ import { ExportService } from '../services/reports/ExportService';
 import { useFinance } from '../modules/FinanceContext';
 import { getMonthLabel } from '../core/utils/date';
 import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
-import { APP_VERSION_CONFIG, getAppVersionString } from '../core/version';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
 import { Badge } from '../core/components/Badge';
 import { Input } from '../core/components/Input';
+import { WhatsNewModal } from '../core/components/WhatsNewModal';
+import { APP_VERSION_CONFIG, getAppVersionString, RELEASE_HISTORY } from '../core/version';
 import { AuthScreen } from './AuthScreen';
 import { OnboardingScreen } from './OnboardingScreen';
 import { Ionicons } from '@expo/vector-icons';
@@ -50,6 +51,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [statusMessage, setStatusMessage] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showTutorialModal, setShowTutorialModal] = useState(false);
+  const [showWhatsNewManual, setShowWhatsNewManual] = useState(false);
 
   // Modal Customizado de Atualizações OTA
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -818,21 +820,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
 
           <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
 
-          {/* App Info */}
-          <View style={styles.cell}>
-            <View style={[styles.cellIconWrap, { backgroundColor: theme.surfaceVariant }]}>
-              <Ionicons name="phone-portrait-outline" size={20} color={theme.textMuted} />
+          {/* App Info / Ver Novidades */}
+          <TouchableOpacity
+            style={styles.cell}
+            activeOpacity={0.7}
+            onPress={() => setShowWhatsNewManual(true)}
+          >
+            <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}18` }]}>
+              <Ionicons name="sparkles" size={18} color={theme.primary} />
             </View>
             <View style={styles.cellTextWrap}>
               <Text style={[styles.cellTitle, { color: theme.text }]}>
-                Finanças Pessoais
+                Novidades da Versão
               </Text>
               <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
-                {getAppVersionString()} • {APP_VERSION_CONFIG.platform}
+                {getAppVersionString()} • Toque para ver o histórico
               </Text>
             </View>
             <Badge label={`v${APP_VERSION_CONFIG.version}`} variant="primary" />
-          </View>
+          </TouchableOpacity>
         </Card>
 
         {/* SECTION 5: Zona de Perigo */}
@@ -1388,6 +1394,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
           <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 24 }} />
         </View>
       )}
+
+      {/* MODAL DE HISTÓRICO DE NOVIDADES */}
+      <WhatsNewModal
+        visible={showWhatsNewManual}
+        onClose={() => setShowWhatsNewManual(false)}
+        previousVersion={null}
+        releaseNotes={RELEASE_HISTORY}
+      />
     </View>
   );
 };
