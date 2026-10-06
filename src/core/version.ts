@@ -13,8 +13,8 @@ export interface ReleaseNote {
 }
 
 export const APP_VERSION_CONFIG = {
-  version: '1.3.7',
-  buildNumber: 13,
+  version: '1.3.8',
+  buildNumber: 14,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -25,6 +25,30 @@ export const getAppVersionString = (): string => {
 };
 
 export const RELEASE_HISTORY: ReleaseNote[] = [
+  {
+    version: '1.3.8',
+    buildNumber: 14,
+    date: '06/10/2026',
+    title: 'Ajustes Mais Profissionais & Minimalistas ✨',
+    highlight: 'Interface de Preferências redesenhada no padrão fintech moderno com seletores em bottom sheet e navegação elegante.',
+    changes: [
+      {
+        icon: 'sparkles-outline',
+        title: 'Design Limpo e Profissional',
+        description: 'Os botões aglomerados foram substituídos por células elegantes com o valor atual em destaque e setas discretas.',
+      },
+      {
+        icon: 'options-outline',
+        title: 'Seletores em Folha Inferior (Modal)',
+        description: 'Ao tocar em qualquer preferência (Avisos, Cálculo de Saldo ou Gesto de Deslize), abre-se um modal dedicado com cards explicativos e feedback instantâneo.',
+      },
+      {
+        icon: 'color-palette-outline',
+        title: 'Harmonia Visual Fintech',
+        description: 'Alinhamento visual uniforme mantendo a consistência com biometria, tema escuro e gestão de conta.',
+      },
+    ],
+  },
   {
     version: '1.3.7',
     buildNumber: 13,

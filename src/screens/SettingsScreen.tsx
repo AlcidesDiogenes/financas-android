@@ -29,6 +29,7 @@ import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
 import { Badge } from '../core/components/Badge';
 import { Input } from '../core/components/Input';
+import { ModalContainer } from '../core/components/ModalContainer';
 import { WhatsNewModal } from '../core/components/WhatsNewModal';
 import { APP_VERSION_CONFIG, getAppVersionString, RELEASE_HISTORY } from '../core/version';
 import { AuthScreen } from './AuthScreen';
@@ -49,6 +50,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const { transactions, selectedMonth, selectedYear, reloadAll, balanceMode, setBalanceMode } = useFinance();
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [activePrefModal, setActivePrefModal] = useState<'badge' | 'balance' | 'swipe' | null>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -678,210 +680,95 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
           <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
 
           {/* Estilo de Avisos na Barra Inferior */}
-          <View style={styles.cellColumn}>
-            <View style={styles.cell}>
-              <View style={[styles.cellIconWrap, { backgroundColor: '#EF444420' }]}>
-                <Ionicons name="notifications-outline" size={20} color="#EF4444" />
-              </View>
-              <View style={styles.cellTextWrap}>
-                <Text style={[styles.cellTitle, { color: theme.text }]}>
-                  Avisos na Barra Inferior
-                </Text>
-                <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
-                  {badgeStyle === 'number'
-                    ? 'Exibindo contador numérico de pendências'
-                    : badgeStyle === 'dot'
-                    ? 'Exibindo indicador discreto (bolinha)'
-                    : 'Avisos e alertas ocultos na barra'}
-                </Text>
-              </View>
+          <TouchableOpacity
+            style={styles.cell}
+            activeOpacity={0.7}
+            onPress={() => setActivePrefModal('badge')}
+          >
+            <View style={[styles.cellIconWrap, { backgroundColor: '#EF444418' }]}>
+              <Ionicons name="notifications-outline" size={20} color="#EF4444" />
             </View>
-
-            <View style={styles.badgeOptionRow}>
-              {(
-                [
-                  { id: 'number', label: 'Número', icon: '123' },
-                  { id: 'dot', label: 'Bolinha', icon: 'ellipse' },
-                  { id: 'none', label: 'Nenhum', icon: 'close-circle-outline' },
-                ] as const
-              ).map((opt) => {
-                const isSelected = badgeStyle === opt.id;
-                return (
-                  <TouchableOpacity
-                    key={opt.id}
-                    onPress={() => setBadgeStyle(opt.id as BottomBarBadgeStyle)}
-                    activeOpacity={0.7}
-                    style={[
-                      styles.badgeOptionBtn,
-                      {
-                        backgroundColor: isSelected ? `${theme.primary}15` : theme.surfaceVariant,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.badgeOptionContent}>
-                      {opt.id === 'number' && (
-                        <View style={[styles.previewBadgeNum, { backgroundColor: '#EF4444' }]}>
-                          <Text style={styles.previewBadgeNumText}>3</Text>
-                        </View>
-                      )}
-                      {opt.id === 'dot' && (
-                        <View style={[styles.previewBadgeDot, { backgroundColor: '#EF4444' }]} />
-                      )}
-                      {opt.id === 'none' && (
-                        <Ionicons
-                          name="eye-off-outline"
-                          size={14}
-                          color={isSelected ? theme.primary : theme.textMuted}
-                        />
-                      )}
-                      <Text
-                        style={[
-                          styles.badgeOptionLabel,
-                          {
-                            color: isSelected ? theme.primary : theme.text,
-                            fontWeight: isSelected ? '700' : '500',
-                          },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+            <View style={styles.cellTextWrap}>
+              <Text style={[styles.cellTitle, { color: theme.text }]}>
+                Avisos na Barra Inferior
+              </Text>
+              <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                {badgeStyle === 'number'
+                  ? 'Contador numérico de pendências'
+                  : badgeStyle === 'dot'
+                  ? 'Indicador discreto (bolinha)'
+                  : 'Avisos e alertas ocultos'}
+              </Text>
             </View>
-          </View>
+            <View style={styles.cellValueWrap}>
+              <Text style={[styles.cellValueText, { color: theme.primary }]}>
+                {badgeStyle === 'number'
+                  ? 'Número'
+                  : badgeStyle === 'dot'
+                  ? 'Bolinha'
+                  : 'Nenhum'}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </View>
+          </TouchableOpacity>
 
           <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
 
           {/* Modo de Cálculo do Saldo Principal */}
-          <View style={styles.cellColumn}>
-            <View style={styles.cell}>
-              <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}20` }]}>
-                <Ionicons name="wallet-outline" size={20} color={theme.primary} />
-              </View>
-              <View style={styles.cellTextWrap}>
-                <Text style={[styles.cellTitle, { color: theme.text }]}>
-                  Cálculo do Saldo Principal
-                </Text>
-                <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
-                  {balanceMode === 'realized'
-                    ? 'Saldo Real: Atualiza somente quando você marca como pago/recebido'
-                    : 'Saldo Previsto: Já desconta todas as contas fixas do mês (checklist de quitação)'}
-                </Text>
-              </View>
+          <TouchableOpacity
+            style={styles.cell}
+            activeOpacity={0.7}
+            onPress={() => setActivePrefModal('balance')}
+          >
+            <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}18` }]}>
+              <Ionicons name="wallet-outline" size={20} color={theme.primary} />
             </View>
-
-            <View style={styles.badgeOptionRow}>
-              {(
-                [
-                  { id: 'realized', label: 'Real (Caixa)', icon: 'cash-outline' },
-                  { id: 'projected', label: 'Previsto Total', icon: 'calculator-outline' },
-                ] as const
-              ).map((opt) => {
-                const isSelected = balanceMode === opt.id;
-                return (
-                  <TouchableOpacity
-                    key={opt.id}
-                    onPress={() => setBalanceMode(opt.id as any)}
-                    activeOpacity={0.7}
-                    style={[
-                      styles.badgeOptionBtn,
-                      {
-                        backgroundColor: isSelected ? `${theme.primary}15` : theme.surfaceVariant,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.badgeOptionContent}>
-                      <Ionicons
-                        name={opt.icon as any}
-                        size={15}
-                        color={isSelected ? theme.primary : theme.textMuted}
-                      />
-                      <Text
-                        style={[
-                          styles.badgeOptionLabel,
-                          {
-                            color: isSelected ? theme.primary : theme.text,
-                            fontWeight: isSelected ? '700' : '500',
-                          },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+            <View style={styles.cellTextWrap}>
+              <Text style={[styles.cellTitle, { color: theme.text }]}>
+                Cálculo do Saldo Principal
+              </Text>
+              <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                {balanceMode === 'realized'
+                  ? 'Regime Real de Caixa'
+                  : 'Regime Previsto (com Contas Fixas)'}
+              </Text>
             </View>
-          </View>
+            <View style={styles.cellValueWrap}>
+              <Text style={[styles.cellValueText, { color: theme.primary }]}>
+                {balanceMode === 'realized' ? 'Real' : 'Previsto'}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </View>
+          </TouchableOpacity>
 
           <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
 
           {/* Gestos ao Deslizar nas Contas (Swipe) */}
-          <View style={styles.cellColumn}>
-            <View style={styles.cell}>
-              <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}20` }]}>
-                <Ionicons name="swap-horizontal-outline" size={20} color={theme.primary} />
-              </View>
-              <View style={styles.cellTextWrap}>
-                <Text style={[styles.cellTitle, { color: theme.text }]}>
-                  Lados ao Deslizar nas Contas
-                </Text>
-                <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
-                  {swipePayDirection === 'right'
-                    ? '👉 Direita: Marcar Pago • 👈 Esquerda: Excluir'
-                    : '👈 Esquerda: Marcar Pago • 👉 Direita: Excluir'}
-                </Text>
-              </View>
+          <TouchableOpacity
+            style={styles.cell}
+            activeOpacity={0.7}
+            onPress={() => setActivePrefModal('swipe')}
+          >
+            <View style={[styles.cellIconWrap, { backgroundColor: '#10B98118' }]}>
+              <Ionicons name="swap-horizontal-outline" size={20} color="#10B981" />
             </View>
-
-            <View style={styles.badgeOptionRow}>
-              {(
-                [
-                  { id: 'right', label: 'Padrão (👉 Pagar)', icon: 'arrow-forward-circle-outline' },
-                  { id: 'left', label: 'Invertido (👈 Pagar)', icon: 'arrow-back-circle-outline' },
-                ] as const
-              ).map((opt) => {
-                const isSelected = swipePayDirection === opt.id;
-                return (
-                  <TouchableOpacity
-                    key={opt.id}
-                    onPress={() => setSwipePayDirection(opt.id as SwipePayDirection)}
-                    activeOpacity={0.7}
-                    style={[
-                      styles.badgeOptionBtn,
-                      {
-                        backgroundColor: isSelected ? `${theme.primary}15` : theme.surfaceVariant,
-                        borderColor: isSelected ? theme.primary : theme.border,
-                      },
-                    ]}
-                  >
-                    <View style={styles.badgeOptionContent}>
-                      <Ionicons
-                        name={opt.icon as any}
-                        size={15}
-                        color={isSelected ? theme.primary : theme.textMuted}
-                      />
-                      <Text
-                        style={[
-                          styles.badgeOptionLabel,
-                          {
-                            color: isSelected ? theme.primary : theme.text,
-                            fontWeight: isSelected ? '700' : '500',
-                          },
-                        ]}
-                      >
-                        {opt.label}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
+            <View style={styles.cellTextWrap}>
+              <Text style={[styles.cellTitle, { color: theme.text }]}>
+                Lados ao Deslizar nas Contas
+              </Text>
+              <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                {swipePayDirection === 'right'
+                  ? 'Direita: Pagar • Esquerda: Excluir'
+                  : 'Esquerda: Pagar • Direita: Excluir'}
+              </Text>
             </View>
-          </View>
+            <View style={styles.cellValueWrap}>
+              <Text style={[styles.cellValueText, { color: theme.primary }]}>
+                {swipePayDirection === 'right' ? 'Padrão' : 'Invertido'}
+              </Text>
+              <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </View>
+          </TouchableOpacity>
 
           {/* Alterar Senha (apenas quando logado com conta) */}
           {user ? (
@@ -1542,6 +1429,236 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         previousVersion={null}
         releaseNotes={RELEASE_HISTORY}
       />
+
+      {/* MODAL SELETOR DE PREFERÊNCIAS */}
+      <ModalContainer
+        visible={!!activePrefModal}
+        onClose={() => setActivePrefModal(null)}
+        title={
+          activePrefModal === 'badge'
+            ? 'Avisos na Barra Inferior'
+            : activePrefModal === 'balance'
+            ? 'Cálculo do Saldo Principal'
+            : 'Gesto ao Deslizar nas Contas'
+        }
+      >
+        {activePrefModal === 'badge' && (
+          <View style={{ gap: 12 }}>
+            <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 4 }}>
+              Escolha como deseja visualizar os alertas no menu inferior:
+            </Text>
+            {/* Number */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setBadgeStyle('number');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: badgeStyle === 'number' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: badgeStyle === 'number' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#EF444418' }]}>
+                <View style={{ minWidth: 20, height: 20, borderRadius: 10, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
+                  <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>3</Text>
+                </View>
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Contador Numérico</Text>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  Exibe a quantidade exata de pendências com um badge vermelho.
+                </Text>
+              </View>
+              {badgeStyle === 'number' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+
+            {/* Dot */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setBadgeStyle('dot');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: badgeStyle === 'dot' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: badgeStyle === 'dot' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#EF444418' }]}>
+                <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#EF4444' }} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Indicador Discreto (Bolinha)</Text>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  Mostra um ponto vermelho sutil para avisar pendências.
+                </Text>
+              </View>
+              {badgeStyle === 'dot' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+
+            {/* None */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setBadgeStyle('none');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: badgeStyle === 'none' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: badgeStyle === 'none' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: `${theme.textMuted}18` }]}>
+                <Ionicons name="eye-off-outline" size={20} color={theme.textMuted} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Ocultar Avisos</Text>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  Mantém a barra inferior completamente limpa, sem avisos.
+                </Text>
+              </View>
+              {badgeStyle === 'none' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {activePrefModal === 'balance' && (
+          <View style={{ gap: 12 }}>
+            <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 4 }}>
+              Defina como o card principal de saldo deve operar por padrão:
+            </Text>
+            {/* Projected */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setBalanceMode('projected');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: balanceMode === 'projected' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: balanceMode === 'projected' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: `${theme.primary}20` }]}>
+                <Ionicons name="calculator-outline" size={22} color={theme.primary} />
+              </View>
+              <View style={{ flex: 1 }}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
+                  <Text style={[styles.prefOptionTitle, { color: theme.text, marginBottom: 0 }]}>Previsto Total</Text>
+                  <Badge label="Recomendado" variant="primary" size="sm" />
+                </View>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  Já contempla todas as receitas e despesas fixas previstas do mês.
+                </Text>
+              </View>
+              {balanceMode === 'projected' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+
+            {/* Realized */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setBalanceMode('realized');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: balanceMode === 'realized' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: balanceMode === 'realized' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#10B98120' }]}>
+                <Ionicons name="cash-outline" size={22} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Real de Caixa</Text>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  Altera somente quando transações são registradas ou contas são quitadas.
+                </Text>
+              </View>
+              {balanceMode === 'realized' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {activePrefModal === 'swipe' && (
+          <View style={{ gap: 12 }}>
+            <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 4 }}>
+              Escolha a direção do gesto ao deslizar os cards de contas:
+            </Text>
+            {/* Right */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setSwipePayDirection('right');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: swipePayDirection === 'right' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: swipePayDirection === 'right' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#10B98120' }]}>
+                <Ionicons name="arrow-forward" size={20} color="#10B981" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Padrão</Text>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  👉 Deslizar para Direita: Marcar Pago / Recebido{'\n'}
+                  👈 Deslizar para Esquerda: Excluir Conta
+                </Text>
+              </View>
+              {swipePayDirection === 'right' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+
+            {/* Left */}
+            <TouchableOpacity
+              activeOpacity={0.7}
+              onPress={async () => {
+                await setSwipePayDirection('left');
+                setActivePrefModal(null);
+              }}
+              style={[
+                styles.prefOptionCard,
+                {
+                  backgroundColor: swipePayDirection === 'left' ? `${theme.primary}12` : theme.surfaceVariant,
+                  borderColor: swipePayDirection === 'left' ? theme.primary : theme.border,
+                },
+              ]}
+            >
+              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#3B82F620' }]}>
+                <Ionicons name="arrow-back" size={20} color="#3B82F6" />
+              </View>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Invertido</Text>
+                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
+                  👈 Deslizar para Esquerda: Marcar Pago / Recebido{'\n'}
+                  👉 Deslizar para Direita: Excluir Conta
+                </Text>
+              </View>
+              {swipePayDirection === 'left' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
+            </TouchableOpacity>
+          </View>
+        )}
+      </ModalContainer>
     </View>
   );
 };
@@ -1636,6 +1753,39 @@ const styles = StyleSheet.create({
   cellSubtitle: {
     fontSize: 11,
     marginTop: 2,
+  },
+  cellValueWrap: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  cellValueText: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  prefOptionCard: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    gap: 12,
+  },
+  prefOptionIconWrap: {
+    width: 38,
+    height: 38,
+    borderRadius: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  prefOptionTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  prefOptionDesc: {
+    fontSize: 12,
+    lineHeight: 16,
   },
   cellSeparator: {
     height: 1,
