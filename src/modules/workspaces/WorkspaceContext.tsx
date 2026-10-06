@@ -254,8 +254,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ownerEmail = user?.email || 'meu@email.com';
     const ownerName = user?.name || 'Você';
 
+    const randomSuffix = Math.random().toString(36).substring(2, 8);
     const newWs: Workspace = {
-      id: `ws-${Date.now()}`,
+      id: `ws-${Date.now()}-${randomSuffix}`,
       name,
       description,
       type: isShared ? 'shared' : 'solo',
@@ -603,6 +604,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
       if (error || !data) {
         return { success: false, message: 'Código de convite não encontrado.' };
+      }
+
+      if (data.type === 'solo') {
+        return { success: false, message: 'Espaços pessoais são 100% privados e não aceitam novos membros.' };
       }
 
       const alreadyExists = workspaces.some((w) => w.id === data.id);
