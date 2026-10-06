@@ -1,7 +1,9 @@
+import { Share } from 'react-native';
 import * as FileSystem from 'expo-file-system/legacy';
 import * as Sharing from 'expo-sharing';
 import { Transaction } from '../../modules/transactions/types';
 import { formatShortDate } from '../../core/utils/date';
+import { formatCurrency } from '../../core/utils/currency';
 
 export class ExportService {
   static async exportTransactionsToCSV(
@@ -40,6 +42,94 @@ export class ExportService {
         UTI: 'public.comma-separated-values-text',
       });
 
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  static async shareMonthlySummaryText(params: {
+    monthLabel: string;
+    totalIncome: number;
+    totalExpense: number;
+    balance: number;
+    topCategories: { category: string; total: number }[];
+    recurringsPaidCount: number;
+    recurringsPendingCount: number;
+  }): Promise<boolean> {
+    try {
+      const {
+        monthLabel,
+        totalIncome,
+        totalExpense,
+        balance,
+        topCategories,
+        recurringsPaidCount,
+        recurringsPendingCount,
+      } = params;
+
+      const lines = [
+        `📊 *Resumo Financeiro - ${monthLabel}*`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `🟢 *Receitas:* ${formatCurrency(totalIncome)}`,
+        `🔴 *Despesas:* ${formatCurrency(totalExpense)}`,
+        `💰 *Saldo Líquido:* ${formatCurrency(balance)} ${balance >= 0 ? '✅' : '⚠️'}`,
+        ``,
+        `📋 *Contas Fixas Recorrentes:*`,
+        `• ${recurringsPaidCount} pagas`,
+        `• ${recurringsPendingCount} pendentes`,
+      ];
+
+      if (topCategories.length > 0) {
+        lines.push(``, `🏷️ *Principais Gastos por Categoria:*`);
+        topCategories.slice(0, 4).forEach((c) => {
+          lines.push(`• ${c.category}: ${formatCurrency(c.total)}`);
+        });
+      }
+
+      lines.push(``, `_Gerado pelo App de Finanças_ 📱`);
+
+      await Share.share({
+        message: lines.join('\n'),
+      });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  static async shareHouseholdSplitText(params: {
+    workspaceName: string;
+    monthLabel: string;
+    totalExpense: number;
+    personSplits: { person: string; total: number; percentage: number }[];
+    settlementSuggestion?: string;
+  }): Promise<boolean> {
+    try {
+      const { workspaceName, monthLabel, totalExpense, personSplits, settlementSuggestion } = params;
+
+      const lines = [
+        `🤝 *Divisão de Contas da Casa - ${monthLabel}*`,
+        `🏠 *Espaço:* ${workspaceName}`,
+        `━━━━━━━━━━━━━━━━━━━━`,
+        `💳 *Total Gasto no Mês:* ${formatCurrency(totalExpense)}`,
+        ``,
+        `👥 *Contribuição de Cada Um:*`,
+      ];
+
+      personSplits.forEach((p) => {
+        lines.push(`• *${p.person}:* ${formatCurrency(p.total)} (${p.percentage}%)`);
+      });
+
+      if (settlementSuggestion) {
+        lines.push(``, `⚖️ *Sugestão de Acerto:*`, settlementSuggestion);
+      }
+
+      lines.push(``, `_Gerado pelo App de Finanças_ 📱`);
+
+      await Share.share({
+        message: lines.join('\n'),
+      });
       return true;
     } catch {
       return false;

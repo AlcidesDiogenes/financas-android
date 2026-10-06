@@ -6,6 +6,7 @@ import {
   TouchableOpacity,
   ScrollView,
   Alert,
+  Switch,
 } from 'react-native';
 import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
@@ -38,6 +39,7 @@ interface AddRecurringModalProps {
     notes?: string;
     startDate?: string;
     endDate?: string;
+    isPaused?: boolean;
   }) => void;
   onDelete?: (id: string) => void;
 }
@@ -83,6 +85,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
     `${String(currentPeriod.month).padStart(2, '0')}/${currentPeriod.year}`
   );
   const [endMonthYear, setEndMonthYear] = useState<string>('');
+  const [isPaused, setIsPaused] = useState(false);
   const [titleError, setTitleError] = useState('');
   const [amountError, setAmountError] = useState('');
   const [dueDayError, setDueDayError] = useState('');
@@ -99,6 +102,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         setFrequency(initialData.frequency || 'monthly');
         setAssignedTo(initialData.assignedTo || '');
         setNotes(initialData.notes || '');
+        setIsPaused(initialData.isPaused || false);
 
         if (initialData.startDate) {
           const parts = initialData.startDate.split('-');
@@ -130,6 +134,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         setFrequency('monthly');
         setAssignedTo('');
         setNotes('');
+        setIsPaused(false);
         setStartMonthYear(`${String(currentPeriod.month).padStart(2, '0')}/${currentPeriod.year}`);
         setEndMonthYear('');
       }
@@ -211,6 +216,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       notes: notes.trim() || undefined,
       startDate: startDateFormatted,
       endDate: endDateFormatted,
+      isPaused,
     });
 
     onClose();
@@ -478,6 +484,21 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         onChangeText={setNotes}
       />
 
+      <View style={[styles.pauseContainer, { backgroundColor: theme.card, borderColor: theme.border }]}>
+        <View style={{ flex: 1, marginRight: 12 }}>
+          <Text style={[styles.pauseTitle, { color: theme.text }]}>Pausar Recorrência</Text>
+          <Text style={[styles.pauseSubtitle, { color: theme.textMuted }]}>
+            Desativa temporariamente sem precisar excluir a conta
+          </Text>
+        </View>
+        <Switch
+          value={isPaused}
+          onValueChange={setIsPaused}
+          trackColor={{ false: theme.border, true: '#F59E0B' }}
+          thumbColor={isPaused ? '#FFF' : '#F4F3F4'}
+        />
+      </View>
+
       <Button
         title={initialData ? 'Salvar Alterações' : type === 'income' ? 'Salvar Provento / Renda' : 'Salvar Conta / Débito Fixo'}
         onPress={handleSave}
@@ -560,5 +581,22 @@ const styles = StyleSheet.create({
     marginLeft: 6,
     fontSize: 12,
     fontWeight: '700',
+  },
+  pauseContainer: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  pauseTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    marginBottom: 2,
+  },
+  pauseSubtitle: {
+    fontSize: 12,
   },
 });

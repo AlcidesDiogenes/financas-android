@@ -5,6 +5,8 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
+  TextInput,
 } from 'react-native';
 import { useTheme } from '../core/theme/ThemeContext';
 import { useFinance } from '../modules/FinanceContext';
@@ -19,7 +21,11 @@ import { Input } from '../core/components/Input';
 import { ModalContainer } from '../core/components/ModalContainer';
 import { PeriodSelector } from '../core/components/PeriodSelector';
 import { getMonthLabel } from '../core/utils/date';
+import { getCategoryMeta } from '../core/utils/categories';
 import { Ionicons } from '@expo/vector-icons';
+
+type GroupMode = 'due' | 'person' | 'category' | 'custom';
+type TypeFilter = 'all' | 'expense' | 'income';
 
 export const RecurringsScreen: React.FC = () => {
   const { theme } = useTheme();
@@ -32,29 +38,50 @@ export const RecurringsScreen: React.FC = () => {
     updateRecurring,
     updateRecurringAmount,
     toggleRecurringPaid,
+    batchSetRecurringsPaid,
+    reorderRecurrings,
     deleteRecurring,
   } = useFinance();
 
+  // Filters & Modes
   const [filterVigencia, setFilterVigencia] = useState<'active' | 'all'>('active');
+  const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
+  const [groupMode, setGroupMode] = useState<GroupMode>('due');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [collapsedPaid, setCollapsedPaid] = useState(false);
+  const [isReorderMode, setIsReorderMode] = useState(false);
+
+  // Modals state
   const [modalVisible, setModalVisible] = useState(false);
   const [fullEditItem, setFullEditItem] = useState<RecurringDebit | null>(null);
   const [editAmountModalVisible, setEditAmountModalVisible] = useState(false);
   const [editingItem, setEditingItem] = useState<{ id: string; title: string; amount: number } | null>(null);
   const [newAmountStr, setNewAmountStr] = useState('');
-  const [amountScope, setAmountScope] = useState<'month' | 'base'>('month');
+  const [amountScope, setAmountScope] = useState<'month' | 'forward' | 'base'>('month');
 
+  // Date context
+  const now = new Date();
+  const currentRealMonth = now.getMonth() + 1;
+  const currentRealYear = now.getFullYear();
+  const currentRealDay = now.getDate();
+  const isCurrentMonthCompetence = selectedMonth === currentRealMonth && selectedYear === currentRealYear;
+  const isPastMonthCompetence = selectedYear < currentRealYear || (selectedYear === currentRealYear && selectedMonth < currentRealMonth);
+
+  // Recurrings active in this month
   const activeInMonth = useMemo(() => {
     return recurrings.filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear));
   }, [recurrings, selectedMonth, selectedYear]);
 
-  const displayedRecurrings = useMemo(() => {
+  // Vigencia base list
+  const baseList = useMemo(() => {
     if (filterVigencia === 'active') return activeInMonth;
     return recurrings;
   }, [filterVigencia, activeInMonth, recurrings]);
 
+  // Overall financial summary for activeInMonth
   const stats = useMemo(() => {
-    const expenses = activeInMonth.filter((r) => r.type !== 'income');
-    const incomes = activeInMonth.filter((r) => r.type === 'income');
+    const expenses = activeInMonth.filter((r) => r.type !== 'income' && !r.isPaused);
+    const incomes = activeInMonth.filter((r) => r.type === 'income' && !r.isPaused);
 
     const totalExpense = expenses.reduce((sum, r) => sum + r.amount, 0);
     const paidExpense = expenses
@@ -66,6 +93,10 @@ export const RecurringsScreen: React.FC = () => {
     const receivedIncome = incomes
       .filter((r) => r.isPaidCurrentMonth)
       .reduce((sum, r) => sum + r.amount, 0);
+    const pendingIncome = totalIncome - receivedIncome;
+
+    const netSurplus = totalIncome - totalExpense;
+    const progressPercent = totalExpense > 0 ? Math.min(100, Math.round((paidExpense / totalExpense) * 100)) : 0;
 
     return {
       totalExpense,
@@ -73,9 +104,230 @@ export const RecurringsScreen: React.FC = () => {
       pendingExpense,
       totalIncome,
       receivedIncome,
+      pendingIncome,
+      netSurplus,
+      progressPercent,
       hasIncome: incomes.length > 0,
+      hasExpense: expenses.length > 0,
+      pendingCount: expenses.filter((r) => !r.isPaidCurrentMonth).length,
     };
   }, [activeInMonth]);
+
+  // Filtered by Type & Search
+  const filteredList = useMemo(() => {
+    let list = [...baseList];
+
+    // Filter by type
+    if (typeFilter === 'expense') {
+      list = list.filter((r) => r.type !== 'income');
+    } else if (typeFilter === 'income') {
+      list = list.filter((r) => r.type === 'income');
+    }
+
+    // Filter by search query
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase().trim();
+      list = list.filter(
+        (r) =>
+          r.title.toLowerCase().includes(q) ||
+          r.category.toLowerCase().includes(q) ||
+          (r.assignedTo && r.assignedTo.toLowerCase().includes(q))
+      );
+    }
+
+    return list;
+  }, [baseList, typeFilter, searchQuery]);
+
+  // Handler for Batch Pay All Pending
+  const handleBatchPayPending = (itemsToPay: RecurringDebit[], titlePrefix = 'Liquidar Contas Pendentes') => {
+    const pendingItems = itemsToPay.filter((r) => !r.isPaidCurrentMonth && !r.isPaused);
+    if (pendingItems.length === 0) {
+      Alert.alert('Tudo Pago!', 'Não há contas pendentes nesta lista.');
+      return;
+    }
+
+    const totalAmount = pendingItems.reduce((acc, cur) => acc + cur.amount, 0);
+    Alert.alert(
+      titlePrefix,
+      `Deseja marcar como PAGAS ${pendingItems.length} ${pendingItems.length === 1 ? 'conta pendente' : 'contas pendentes'}, totalizando ${formatCurrency(totalAmount)}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sim, Marcar Pagas',
+          onPress: async () => {
+            const ids = pendingItems.map((r) => r.id);
+            await batchSetRecurringsPaid(ids, true);
+          },
+        },
+      ]
+    );
+  };
+
+  // Reorder handlers
+  const handleMoveItem = async (index: number, direction: 'up' | 'down', list: RecurringDebit[]) => {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1;
+    if (targetIndex < 0 || targetIndex >= list.length) return;
+
+    const copy = [...list];
+    const temp = copy[index];
+    copy[index] = copy[targetIndex];
+    copy[targetIndex] = temp;
+
+    await reorderRecurrings(copy);
+  };
+
+  // Helper renderer for a single Recurring item
+  const renderItem = (item: RecurringDebit, index: number, list: RecurringDebit[]) => {
+    return (
+      <RecurringItem
+        key={item.id}
+        recurring={item}
+        onTogglePaid={toggleRecurringPaid}
+        onEditAmount={(id, curAmt, title) => {
+          setEditingItem({ id, title, amount: curAmt });
+          setNewAmountStr(curAmt > 0 ? curAmt.toString() : '');
+          setAmountScope('month');
+          setEditAmountModalVisible(true);
+        }}
+        onEditFull={(itemToEdit) => {
+          setFullEditItem(itemToEdit);
+          setModalVisible(true);
+        }}
+        onDelete={deleteRecurring}
+        canEdit={canEdit}
+        showVigencia={filterVigencia === 'all'}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        isReorderMode={isReorderMode}
+        onMoveUp={() => handleMoveItem(index, 'up', list)}
+        onMoveDown={() => handleMoveItem(index, 'down', list)}
+        onLongPress={() => {
+          if (canEdit) {
+            setIsReorderMode((prev) => !prev);
+          }
+        }}
+      />
+    );
+  };
+
+  // --- Grouping by Due Date / Urgency ---
+  const dueBuckets = useMemo(() => {
+    const overdue: RecurringDebit[] = [];
+    const dueSoon: RecurringDebit[] = [];
+    const upcoming: RecurringDebit[] = [];
+    const paused: RecurringDebit[] = [];
+    const paid: RecurringDebit[] = [];
+
+    filteredList.forEach((item) => {
+      if (item.isPaused) {
+        paused.push(item);
+        return;
+      }
+      if (item.isPaidCurrentMonth) {
+        paid.push(item);
+        return;
+      }
+
+      // If competence is past and not paid, it's overdue
+      if (isPastMonthCompetence) {
+        if (item.type !== 'income') {
+          overdue.push(item);
+        } else {
+          upcoming.push(item);
+        }
+        return;
+      }
+
+      // If current month
+      if (isCurrentMonthCompetence) {
+        if (item.dueDay < currentRealDay && item.type !== 'income') {
+          overdue.push(item);
+        } else if (item.dueDay >= currentRealDay && item.dueDay <= currentRealDay + 3) {
+          dueSoon.push(item);
+        } else {
+          upcoming.push(item);
+        }
+        return;
+      }
+
+      // Future month
+      upcoming.push(item);
+    });
+
+    const sortByDue = (a: RecurringDebit, b: RecurringDebit) => a.dueDay - b.dueDay;
+    overdue.sort(sortByDue);
+    dueSoon.sort(sortByDue);
+    upcoming.sort(sortByDue);
+    paused.sort(sortByDue);
+    paid.sort(sortByDue);
+
+    return { overdue, dueSoon, upcoming, paused, paid };
+  }, [filteredList, isPastMonthCompetence, isCurrentMonthCompetence, currentRealDay]);
+
+  // --- Grouping by Person / Responsible ---
+  const personGroups = useMemo(() => {
+    const map = new Map<string, RecurringDebit[]>();
+
+    filteredList.forEach((item) => {
+      const personKey = item.assignedTo ? item.assignedTo.trim() : 'Sem Responsável';
+      if (!map.has(personKey)) {
+        map.set(personKey, []);
+      }
+      map.get(personKey)!.push(item);
+    });
+
+    const groups = Array.from(map.entries()).map(([person, items]) => {
+      const expenses = items.filter((r) => r.type !== 'income' && !r.isPaused);
+      const totalExpense = expenses.reduce((s, r) => s + r.amount, 0);
+      const paidExpense = expenses.filter((r) => r.isPaidCurrentMonth).reduce((s, r) => s + r.amount, 0);
+      const pendingExpense = totalExpense - paidExpense;
+      const pendingCount = expenses.filter((r) => !r.isPaidCurrentMonth).length;
+
+      return {
+        person,
+        items,
+        totalExpense,
+        paidExpense,
+        pendingExpense,
+        pendingCount,
+      };
+    });
+
+    // Sort by total expense descending
+    groups.sort((a, b) => b.totalExpense - a.totalExpense);
+    return groups;
+  }, [filteredList]);
+
+  // --- Grouping by Category ---
+  const categoryGroups = useMemo(() => {
+    const map = new Map<string, RecurringDebit[]>();
+
+    filteredList.forEach((item) => {
+      if (!map.has(item.category)) {
+        map.set(item.category, []);
+      }
+      map.get(item.category)!.push(item);
+    });
+
+    const groups = Array.from(map.entries()).map(([category, items]) => {
+      const total = items.reduce((s, r) => s + r.amount, 0);
+      const paid = items.filter((r) => r.isPaidCurrentMonth).reduce((s, r) => s + r.amount, 0);
+      return {
+        category,
+        items,
+        total,
+        paid,
+      };
+    });
+
+    groups.sort((a, b) => b.total - a.total);
+    return groups;
+  }, [filteredList]);
+
+  // --- Custom Order list ---
+  const customList = useMemo(() => {
+    return [...filteredList].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
+  }, [filteredList]);
 
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
@@ -90,140 +342,602 @@ export const RecurringsScreen: React.FC = () => {
       >
         {/* Recurrings Summary Card */}
         <Card variant="elevated" style={styles.summaryCard}>
-          <Text style={[styles.summaryTitle, { color: theme.textMuted }]}>
-            Total em Contas Recorrentes ({getMonthLabel(selectedMonth, selectedYear)})
-          </Text>
-          <Text style={[styles.summaryAmount, { color: theme.text }]}>
-            {formatCurrency(stats.totalExpense)}
-          </Text>
+          <View style={styles.summaryHeaderRow}>
+            <View>
+              <Text style={[styles.summaryTitle, { color: theme.textMuted }]}>
+                {typeFilter === 'income' ? 'Renda Fixa Prevista' : 'Contas Recorrentes'} ({getMonthLabel(selectedMonth, selectedYear)})
+              </Text>
+              <Text style={[styles.summaryAmount, { color: theme.text }]}>
+                {formatCurrency(typeFilter === 'income' ? stats.totalIncome : stats.totalExpense)}
+              </Text>
+            </View>
 
+            {canEdit && stats.pendingCount > 0 && typeFilter !== 'income' && (
+              <TouchableOpacity
+                style={[styles.payAllBtn, { backgroundColor: theme.primary }]}
+                onPress={() => handleBatchPayPending(activeInMonth, 'Liquidar Todas as Pendentes')}
+                activeOpacity={0.8}
+              >
+                <Ionicons name="checkmark-done" size={16} color="#FFF" />
+                <Text style={styles.payAllBtnText}>Pagar Todas</Text>
+              </TouchableOpacity>
+            )}
+          </View>
+
+          {/* Visual Progress Bar for Expenses */}
+          {typeFilter !== 'income' && stats.totalExpense > 0 && (
+            <View style={styles.progressSection}>
+              <View style={styles.progressInfoRow}>
+                <Text style={[styles.progressInfoText, { color: theme.textMuted }]}>
+                  Progresso de Pagamento
+                </Text>
+                <Text style={[styles.progressPercentText, { color: theme.primary, fontWeight: '700' }]}>
+                  {stats.progressPercent}% Concluído
+                </Text>
+              </View>
+              <View style={[styles.progressBarTrack, { backgroundColor: theme.surfaceVariant }]}>
+                <View
+                  style={[
+                    styles.progressBarFill,
+                    {
+                      width: `${stats.progressPercent}%`,
+                      backgroundColor: stats.progressPercent === 100 ? theme.success : theme.primary,
+                    },
+                  ]}
+                />
+              </View>
+            </View>
+          )}
+
+          {/* Status Columns */}
           <View style={[styles.statusRow, { borderTopColor: theme.border }]}>
             <View style={styles.statusCol}>
-              <Text style={[styles.statusLabel, { color: theme.textMuted }]}>
-                Já Pago no Mês
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Ionicons name="checkmark-circle" size={14} color={theme.success} style={{ marginRight: 4 }} />
+                <Text style={[styles.statusLabel, { color: theme.textMuted }]}>
+                  {typeFilter === 'income' ? 'Recebido' : 'Já Pago no Mês'}
+                </Text>
+              </View>
               <Text style={[styles.statusValue, { color: theme.success }]}>
-                {formatCurrency(stats.paidExpense)}
+                {formatCurrency(typeFilter === 'income' ? stats.receivedIncome : stats.paidExpense)}
               </Text>
             </View>
 
             <View style={[styles.divider, { backgroundColor: theme.border }]} />
 
             <View style={styles.statusCol}>
-              <Text style={[styles.statusLabel, { color: theme.textMuted }]}>
-                Pendente a Pagar
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
+                <Ionicons name="time-outline" size={14} color={theme.warning} style={{ marginRight: 4 }} />
+                <Text style={[styles.statusLabel, { color: theme.textMuted }]}>
+                  {typeFilter === 'income' ? 'A Receber' : 'Pendente a Pagar'}
+                </Text>
+              </View>
               <Text style={[styles.statusValue, { color: theme.warning }]}>
-                {formatCurrency(stats.pendingExpense)}
+                {formatCurrency(typeFilter === 'income' ? stats.pendingIncome : stats.pendingExpense)}
               </Text>
             </View>
           </View>
 
-          {stats.hasIncome && (
-            <View style={[styles.incomeSummaryRow, { borderTopColor: theme.border }]}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons name="arrow-up-circle" size={18} color={theme.success} style={{ marginRight: 6 }} />
-                <Text style={{ fontSize: 13, color: theme.textMuted, fontWeight: '600' }}>
-                  Renda Fixa / Proventos:
+          {/* Sobra Livre Recorrente (Rendas - Despesas Fixas) */}
+          {stats.hasIncome && typeFilter === 'all' && (
+            <View style={[styles.surplusRow, { borderTopColor: theme.border }]}>
+              <View>
+                <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '600' }}>
+                  Sobra Livre Fixa Prevista:
+                </Text>
+                <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>
+                  (Renda Fixa: {formatCurrency(stats.totalIncome)})
                 </Text>
               </View>
-              <Text style={{ fontSize: 15, fontWeight: '700', color: theme.success }}>
-                {formatCurrency(stats.totalIncome)}
-              </Text>
+              <View style={{ alignItems: 'flex-end' }}>
+                <Text
+                  style={{
+                    fontSize: 16,
+                    fontWeight: '800',
+                    color: stats.netSurplus >= 0 ? theme.success : theme.danger,
+                  }}
+                >
+                  {formatCurrency(stats.netSurplus)}
+                </Text>
+                <Text style={{ fontSize: 10, color: theme.textMuted, fontWeight: '600' }}>
+                  {stats.netSurplus >= 0 ? 'Positivo' : 'Déficit'}
+                </Text>
+              </View>
             </View>
           )}
         </Card>
 
-        {/* Section title & Filter Pills */}
-        <View style={styles.sectionHeader}>
-          <Text style={[styles.sectionTitle, { color: theme.text }]}>
-            Contas e Rendas Recorrentes
-          </Text>
-          <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-            Toque no status para marcar como pago/recebido ou pendente
-          </Text>
+        {/* Search Bar */}
+        <View style={[styles.searchBar, { backgroundColor: theme.card, borderColor: theme.border }]}>
+          <Ionicons name="search-outline" size={18} color={theme.textMuted} style={{ marginRight: 8 }} />
+          <TextInput
+            placeholder="Buscar por conta, categoria ou pessoa..."
+            placeholderTextColor={theme.textMuted}
+            value={searchQuery}
+            onChangeText={setSearchQuery}
+            style={[styles.searchInput, { color: theme.text }]}
+          />
+          {searchQuery.length > 0 && (
+            <TouchableOpacity onPress={() => setSearchQuery('')} hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}>
+              <Ionicons name="close-circle" size={18} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Filter Pills */}
-        <View style={styles.filterRow}>
+        {/* 1st Control Row: Type Tabs (Todas | Despesas | Receitas) */}
+        <View style={[styles.typeTabBar, { backgroundColor: theme.surfaceVariant }]}>
           <TouchableOpacity
             style={[
-              styles.filterPill,
+              styles.typeTabBtn,
+              typeFilter === 'all' && [styles.typeTabBtnActive, { backgroundColor: theme.primary }],
+            ]}
+            onPress={() => setTypeFilter('all')}
+          >
+            <Text
+              style={[
+                styles.typeTabText,
+                { color: typeFilter === 'all' ? '#FFF' : theme.text },
+              ]}
+            >
+              Todas ({baseList.length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.typeTabBtn,
+              typeFilter === 'expense' && [styles.typeTabBtnActive, { backgroundColor: theme.danger }],
+            ]}
+            onPress={() => setTypeFilter('expense')}
+          >
+            <Text
+              style={[
+                styles.typeTabText,
+                { color: typeFilter === 'expense' ? '#FFF' : theme.text },
+              ]}
+            >
+              🔴 Despesas ({baseList.filter((r) => r.type !== 'income').length})
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.typeTabBtn,
+              typeFilter === 'income' && [styles.typeTabBtnActive, { backgroundColor: theme.success }],
+            ]}
+            onPress={() => setTypeFilter('income')}
+          >
+            <Text
+              style={[
+                styles.typeTabText,
+                { color: typeFilter === 'income' ? '#FFF' : theme.text },
+              ]}
+            >
+              🟢 Rendas ({baseList.filter((r) => r.type === 'income').length})
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* 2nd Control Row: Grouping Modes (Vencimento | Por Pessoa | Categoria | Personalizado) */}
+        <View style={styles.groupModesRow}>
+          <Text style={[styles.groupModesLabel, { color: theme.textMuted }]}>
+            Agrupar por:
+          </Text>
+          <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <TouchableOpacity
+              style={[
+                styles.groupModeChip,
+                {
+                  backgroundColor: groupMode === 'due' ? theme.primary : theme.surfaceVariant,
+                  borderColor: groupMode === 'due' ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => {
+                setGroupMode('due');
+                setIsReorderMode(false);
+              }}
+            >
+              <Ionicons
+                name="calendar-outline"
+                size={14}
+                color={groupMode === 'due' ? '#FFF' : theme.text}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.groupModeChipText, { color: groupMode === 'due' ? '#FFF' : theme.text }]}>
+                Vencimento
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.groupModeChip,
+                {
+                  backgroundColor: groupMode === 'person' ? theme.primary : theme.surfaceVariant,
+                  borderColor: groupMode === 'person' ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => {
+                setGroupMode('person');
+                setIsReorderMode(false);
+              }}
+            >
+              <Ionicons
+                name="people-outline"
+                size={14}
+                color={groupMode === 'person' ? '#FFF' : theme.text}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.groupModeChipText, { color: groupMode === 'person' ? '#FFF' : theme.text }]}>
+                Por Pessoa
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.groupModeChip,
+                {
+                  backgroundColor: groupMode === 'category' ? theme.primary : theme.surfaceVariant,
+                  borderColor: groupMode === 'category' ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => {
+                setGroupMode('category');
+                setIsReorderMode(false);
+              }}
+            >
+              <Ionicons
+                name="pricetag-outline"
+                size={14}
+                color={groupMode === 'category' ? '#FFF' : theme.text}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.groupModeChipText, { color: groupMode === 'category' ? '#FFF' : theme.text }]}>
+                Categoria
+              </Text>
+            </TouchableOpacity>
+
+            <TouchableOpacity
+              style={[
+                styles.groupModeChip,
+                {
+                  backgroundColor: groupMode === 'custom' ? theme.primary : theme.surfaceVariant,
+                  borderColor: groupMode === 'custom' ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => {
+                setGroupMode('custom');
+                setIsReorderMode(true);
+              }}
+            >
+              <Ionicons
+                name="reorder-two-outline"
+                size={14}
+                color={groupMode === 'custom' ? '#FFF' : theme.text}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.groupModeChipText, { color: groupMode === 'custom' ? '#FFF' : theme.text }]}>
+                Ordem Livre
+              </Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </View>
+
+        {/* Vigência Switch Pills */}
+        <View style={styles.vigenciaFilterRow}>
+          <TouchableOpacity
+            style={[
+              styles.vigenciaPill,
               {
-                backgroundColor:
-                  filterVigencia === 'active' ? theme.primary : theme.surfaceVariant,
+                backgroundColor: filterVigencia === 'active' ? theme.surface : 'transparent',
+                borderColor: filterVigencia === 'active' ? theme.primary : theme.border,
               },
             ]}
             onPress={() => setFilterVigencia('active')}
-            activeOpacity={0.7}
           >
             <Text
               style={[
-                styles.filterText,
-                { color: filterVigencia === 'active' ? '#FFF' : theme.text },
+                styles.vigenciaText,
+                { color: filterVigencia === 'active' ? theme.primary : theme.textMuted },
               ]}
             >
-              Vigentes no Mês ({activeInMonth.length})
+              Vigentes em {getMonthLabel(selectedMonth, selectedYear)} ({activeInMonth.length})
             </Text>
           </TouchableOpacity>
 
           <TouchableOpacity
             style={[
-              styles.filterPill,
+              styles.vigenciaPill,
               {
-                backgroundColor:
-                  filterVigencia === 'all' ? theme.primary : theme.surfaceVariant,
+                backgroundColor: filterVigencia === 'all' ? theme.surface : 'transparent',
+                borderColor: filterVigencia === 'all' ? theme.primary : theme.border,
               },
             ]}
             onPress={() => setFilterVigencia('all')}
-            activeOpacity={0.7}
           >
             <Text
               style={[
-                styles.filterText,
-                { color: filterVigencia === 'all' ? '#FFF' : theme.text },
+                styles.vigenciaText,
+                { color: filterVigencia === 'all' ? theme.primary : theme.textMuted },
               ]}
             >
-              Todos ({recurrings.length})
+              Todas Cadastradas ({recurrings.length})
             </Text>
           </TouchableOpacity>
         </View>
 
-        {displayedRecurrings.length === 0 ? (
-          <Card variant="flat" style={{ alignItems: 'center', paddingVertical: 32 }}>
-            <Ionicons name="calendar-outline" size={36} color={theme.textMuted} />
-            <Text style={{ color: theme.textMuted, marginTop: 8 }}>
-              {filterVigencia === 'active'
-                ? `Nenhum item recorrente vigente em ${getMonthLabel(selectedMonth, selectedYear)}.`
-                : 'Nenhum item recorrente cadastrado.'}
+        {/* Reorder Mode Banner */}
+        {isReorderMode && (
+          <View style={[styles.reorderBanner, { backgroundColor: '#3B82F620', borderColor: '#3B82F6' }]}>
+            <Ionicons name="information-circle" size={18} color="#3B82F6" style={{ marginRight: 8 }} />
+            <Text style={[styles.reorderBannerText, { color: '#3B82F6' }]}>
+              Modo de reordenação ativo. Use as setas para ajustar a sequência das contas.
+            </Text>
+            <TouchableOpacity
+              style={styles.reorderCloseBtn}
+              onPress={() => setIsReorderMode(false)}
+            >
+              <Text style={styles.reorderCloseBtnText}>Concluir</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* Empty State */}
+        {filteredList.length === 0 ? (
+          <Card variant="flat" style={{ alignItems: 'center', paddingVertical: 40, marginTop: 12 }}>
+            <Ionicons name="calendar-outline" size={42} color={theme.textMuted} />
+            <Text style={{ color: theme.text, fontSize: 16, fontWeight: '700', marginTop: 12 }}>
+              Nenhum item encontrado
+            </Text>
+            <Text style={{ color: theme.textMuted, marginTop: 4, textAlign: 'center', paddingHorizontal: 20 }}>
+              {searchQuery.trim()
+                ? `Não encontramos resultados para "${searchQuery}".`
+                : filterVigencia === 'active'
+                ? `Nenhuma conta ou provento ativo em ${getMonthLabel(selectedMonth, selectedYear)}.`
+                : 'Cadastre suas contas fixas e proventos para organizar o mês.'}
             </Text>
           </Card>
         ) : (
-          displayedRecurrings.map((item) => (
-            <RecurringItem
-              key={item.id}
-              recurring={item}
-              onTogglePaid={toggleRecurringPaid}
-              onEditAmount={(id, curAmt, title) => {
-                setEditingItem({ id, title, amount: curAmt });
-                setNewAmountStr(curAmt > 0 ? curAmt.toString() : '');
-                setAmountScope('month');
-                setEditAmountModalVisible(true);
-              }}
-              onEditFull={(itemToEdit) => {
-                setFullEditItem(itemToEdit);
-                setModalVisible(true);
-              }}
-              onDelete={deleteRecurring}
-              canEdit={canEdit}
-              showVigencia={filterVigencia === 'all'}
-            />
-          ))
+          <>
+            {/* ======================================================== */}
+            {/* VIEW MODE 1: DUE DATE / URGENCY                         */}
+            {/* ======================================================== */}
+            {groupMode === 'due' && (
+              <View style={{ marginTop: 8 }}>
+                {/* 1. OVERDUE (Atrasadas) */}
+                {dueBuckets.overdue.length > 0 && (
+                  <View style={styles.bucketBlock}>
+                    <View style={[styles.bucketHeader, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="alert-circle" size={18} color="#EF4444" style={{ marginRight: 6 }} />
+                        <Text style={[styles.bucketTitle, { color: '#EF4444' }]}>
+                          Atrasadas ({dueBuckets.overdue.length})
+                        </Text>
+                      </View>
+                      <Text style={[styles.bucketTotal, { color: '#EF4444' }]}>
+                        {formatCurrency(dueBuckets.overdue.reduce((s, r) => s + r.amount, 0))}
+                      </Text>
+                    </View>
+                    {dueBuckets.overdue.map((item, idx) => renderItem(item, idx, dueBuckets.overdue))}
+                  </View>
+                )}
+
+                {/* 2. DUE SOON (Vence Hoje / Em Breve) */}
+                {dueBuckets.dueSoon.length > 0 && (
+                  <View style={styles.bucketBlock}>
+                    <View style={[styles.bucketHeader, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="flash" size={17} color="#F59E0B" style={{ marginRight: 6 }} />
+                        <Text style={[styles.bucketTitle, { color: '#F59E0B' }]}>
+                          Vencem Hoje ou em Breve ({dueBuckets.dueSoon.length})
+                        </Text>
+                      </View>
+                      <Text style={[styles.bucketTotal, { color: '#F59E0B' }]}>
+                        {formatCurrency(dueBuckets.dueSoon.reduce((s, r) => s + r.amount, 0))}
+                      </Text>
+                    </View>
+                    {dueBuckets.dueSoon.map((item, idx) => renderItem(item, idx, dueBuckets.dueSoon))}
+                  </View>
+                )}
+
+                {/* 3. UPCOMING (Próximas do Mês) */}
+                {dueBuckets.upcoming.length > 0 && (
+                  <View style={styles.bucketBlock}>
+                    <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="calendar-outline" size={17} color={theme.text} style={{ marginRight: 6 }} />
+                        <Text style={[styles.bucketTitle, { color: theme.text }]}>
+                          Próximas do Mês ({dueBuckets.upcoming.length})
+                        </Text>
+                      </View>
+                      <Text style={[styles.bucketTotal, { color: theme.text }]}>
+                        {formatCurrency(dueBuckets.upcoming.reduce((s, r) => s + r.amount, 0))}
+                      </Text>
+                    </View>
+                    {dueBuckets.upcoming.map((item, idx) => renderItem(item, idx, dueBuckets.upcoming))}
+                  </View>
+                )}
+
+                {/* 4. PAUSED (Pausadas) */}
+                {dueBuckets.paused.length > 0 && (
+                  <View style={styles.bucketBlock}>
+                    <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="pause-circle-outline" size={17} color={theme.textMuted} style={{ marginRight: 6 }} />
+                        <Text style={[styles.bucketTitle, { color: theme.textMuted }]}>
+                          Recorrências Pausadas ({dueBuckets.paused.length})
+                        </Text>
+                      </View>
+                      <Text style={[styles.bucketTotal, { color: theme.textMuted }]}>
+                        {formatCurrency(dueBuckets.paused.reduce((s, r) => s + r.amount, 0))}
+                      </Text>
+                    </View>
+                    {dueBuckets.paused.map((item, idx) => renderItem(item, idx, dueBuckets.paused))}
+                  </View>
+                )}
+
+                {/* 5. PAID / RECEIVED (Já Pagas no Mês) */}
+                {dueBuckets.paid.length > 0 && (
+                  <View style={styles.bucketBlock}>
+                    <TouchableOpacity
+                      style={[
+                        styles.bucketHeader,
+                        { backgroundColor: '#10B98115', borderColor: '#10B98140' },
+                      ]}
+                      onPress={() => setCollapsedPaid((prev) => !prev)}
+                      activeOpacity={0.8}
+                    >
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Ionicons name="checkmark-circle" size={18} color="#10B981" style={{ marginRight: 6 }} />
+                        <Text style={[styles.bucketTitle, { color: '#10B981' }]}>
+                          Já Pagas / Recebidas ({dueBuckets.paid.length})
+                        </Text>
+                      </View>
+                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                        <Text style={[styles.bucketTotal, { color: '#10B981', marginRight: 8 }]}>
+                          {formatCurrency(dueBuckets.paid.reduce((s, r) => s + r.amount, 0))}
+                        </Text>
+                        <Ionicons
+                          name={collapsedPaid ? 'chevron-down' : 'chevron-up'}
+                          size={18}
+                          color="#10B981"
+                        />
+                      </View>
+                    </TouchableOpacity>
+                    {!collapsedPaid &&
+                      dueBuckets.paid.map((item, idx) => renderItem(item, idx, dueBuckets.paid))}
+                  </View>
+                )}
+              </View>
+            )}
+
+            {/* ======================================================== */}
+            {/* VIEW MODE 2: BY PERSON / RESPONSIBLE                    */}
+            {/* ======================================================== */}
+            {groupMode === 'person' && (
+              <View style={{ marginTop: 8 }}>
+                {/* Household Expense Split Progress Bar */}
+                {personGroups.length > 1 && stats.totalExpense > 0 && (
+                  <Card variant="flat" style={[styles.splitCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+                    <Text style={[styles.splitTitle, { color: theme.textMuted }]}>
+                      Divisão de Contas da Casa ({getMonthLabel(selectedMonth, selectedYear)})
+                    </Text>
+                    <View style={styles.splitMultiBar}>
+                      {personGroups.map((group, idx) => {
+                        const pct = stats.totalExpense > 0 ? (group.totalExpense / stats.totalExpense) * 100 : 0;
+                        if (pct <= 0) return null;
+                        const colors = ['#3B82F6', '#EC4899', '#10B981', '#F59E0B', '#8B5CF6'];
+                        const color = colors[idx % colors.length];
+                        return (
+                          <View
+                            key={group.person}
+                            style={{
+                              width: `${pct}%`,
+                              backgroundColor: color,
+                              height: 10,
+                              borderTopLeftRadius: idx === 0 ? 5 : 0,
+                              borderBottomLeftRadius: idx === 0 ? 5 : 0,
+                              borderTopRightRadius: idx === personGroups.length - 1 ? 5 : 0,
+                              borderBottomRightRadius: idx === personGroups.length - 1 ? 5 : 0,
+                            }}
+                          />
+                        );
+                      })}
+                    </View>
+                    <View style={styles.splitLegendRow}>
+                      {personGroups.map((group, idx) => {
+                        const pct = stats.totalExpense > 0 ? Math.round((group.totalExpense / stats.totalExpense) * 100) : 0;
+                        const colors = ['#3B82F6', '#EC4899', '#10B981', '#F59E0B', '#8B5CF6'];
+                        const color = colors[idx % colors.length];
+                        return (
+                          <View key={group.person} style={styles.splitLegendItem}>
+                            <View style={[styles.splitLegendDot, { backgroundColor: color }]} />
+                            <Text style={[styles.splitLegendText, { color: theme.text }]}>
+                              {group.person}: {pct}% ({formatCurrency(group.totalExpense)})
+                            </Text>
+                          </View>
+                        );
+                      })}
+                    </View>
+                  </Card>
+                )}
+
+                {personGroups.map((group) => (
+                  <View key={group.person} style={styles.bucketBlock}>
+                    <View style={[styles.personHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
+                      <View style={{ flexDirection: 'row', alignItems: 'center', flex: 1 }}>
+                        <View style={[styles.personAvatar, { backgroundColor: theme.primary }]}>
+                          <Text style={styles.personAvatarText}>
+                            {group.person.charAt(0).toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={{ marginLeft: 10 }}>
+                          <Text style={[styles.personName, { color: theme.text }]}>
+                            {group.person}
+                          </Text>
+                          <Text style={[styles.personSubtitle, { color: theme.textMuted }]}>
+                            {group.items.length} {group.items.length === 1 ? 'item' : 'itens'} • {formatCurrency(group.totalExpense)}
+                          </Text>
+                        </View>
+                      </View>
+
+                      {canEdit && group.pendingCount > 0 && (
+                        <TouchableOpacity
+                          style={[styles.personPayBtn, { backgroundColor: theme.primary }]}
+                          onPress={() => handleBatchPayPending(group.items, `Liquidar Contas de ${group.person}`)}
+                        >
+                          <Ionicons name="checkmark-done" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                          <Text style={styles.personPayBtnText}>Pagar ({group.pendingCount})</Text>
+                        </TouchableOpacity>
+                      )}
+                    </View>
+
+                    {group.items.map((item, idx) => renderItem(item, idx, group.items))}
+                  </View>
+                ))}
+              </View>
+            )}
+
+            {/* ======================================================== */}
+            {/* VIEW MODE 3: BY CATEGORY                                */}
+            {/* ======================================================== */}
+            {groupMode === 'category' && (
+              <View style={{ marginTop: 8 }}>
+                {categoryGroups.map((group) => {
+                  const meta = getCategoryMeta(group.category as any);
+                  return (
+                    <View key={group.category} style={styles.bucketBlock}>
+                      <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name={meta.icon as any} size={18} color={meta.color || theme.primary} style={{ marginRight: 8 }} />
+                          <Text style={[styles.bucketTitle, { color: theme.text }]}>
+                            {group.category} ({group.items.length})
+                          </Text>
+                        </View>
+                        <Text style={[styles.bucketTotal, { color: theme.text }]}>
+                          {formatCurrency(group.total)}
+                        </Text>
+                      </View>
+                      {group.items.map((item, idx) => renderItem(item, idx, group.items))}
+                    </View>
+                  );
+                })}
+              </View>
+            )}
+
+            {/* ======================================================== */}
+            {/* VIEW MODE 4: CUSTOM / MANUAL ORDER                      */}
+            {/* ======================================================== */}
+            {groupMode === 'custom' && (
+              <View style={{ marginTop: 8 }}>
+                {customList.map((item, idx) => renderItem(item, idx, customList))}
+              </View>
+            )}
+          </>
         )}
       </ScrollView>
 
-      {/* FAB */}
-      {canEdit && (
+      {/* FAB: Novo Item Recorrente */}
+      {canEdit && !isReorderMode && (
         <View style={styles.fabWrap}>
           <Button
             title="Novo Item Recorrente"
@@ -270,7 +984,7 @@ export const RecurringsScreen: React.FC = () => {
           Escolha como deseja atualizar o valor desta conta ou provento:
         </Text>
 
-        <View style={{ flexDirection: 'row', gap: 8, marginBottom: 16 }}>
+        <View style={{ flexDirection: 'column', gap: 8, marginBottom: 16 }}>
           <TouchableOpacity
             style={[
               styles.scopePill,
@@ -283,6 +997,12 @@ export const RecurringsScreen: React.FC = () => {
             onPress={() => setAmountScope('month')}
             activeOpacity={0.7}
           >
+            <Ionicons
+              name="calendar-outline"
+              size={15}
+              color={amountScope === 'month' ? '#FFF' : theme.text}
+              style={{ marginRight: 6 }}
+            />
             <Text
               style={[
                 styles.scopePillText,
@@ -298,6 +1018,34 @@ export const RecurringsScreen: React.FC = () => {
               styles.scopePill,
               {
                 backgroundColor:
+                  amountScope === 'forward' ? theme.primary : theme.surfaceVariant,
+                borderColor: amountScope === 'forward' ? theme.primary : theme.border,
+              },
+            ]}
+            onPress={() => setAmountScope('forward')}
+            activeOpacity={0.7}
+          >
+            <Ionicons
+              name="arrow-forward-circle-outline"
+              size={15}
+              color={amountScope === 'forward' ? '#FFF' : theme.text}
+              style={{ marginRight: 6 }}
+            />
+            <Text
+              style={[
+                styles.scopePillText,
+                { color: amountScope === 'forward' ? '#FFF' : theme.text },
+              ]}
+            >
+              A partir de {getMonthLabel(selectedMonth, selectedYear)} (em diante)
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.scopePill,
+              {
+                backgroundColor:
                   amountScope === 'base' ? theme.primary : theme.surfaceVariant,
                 borderColor: amountScope === 'base' ? theme.primary : theme.border,
               },
@@ -305,13 +1053,19 @@ export const RecurringsScreen: React.FC = () => {
             onPress={() => setAmountScope('base')}
             activeOpacity={0.7}
           >
+            <Ionicons
+              name="repeat-outline"
+              size={15}
+              color={amountScope === 'base' ? '#FFF' : theme.text}
+              style={{ marginRight: 6 }}
+            />
             <Text
               style={[
                 styles.scopePillText,
                 { color: amountScope === 'base' ? '#FFF' : theme.text },
               ]}
             >
-              Padrão / Todos os meses
+              Todos os meses (Passado e futuro)
             </Text>
           </TouchableOpacity>
         </View>
@@ -329,7 +1083,7 @@ export const RecurringsScreen: React.FC = () => {
             if (editingItem) {
               const val = parseFloat(newAmountStr.replace(',', '.'));
               if (!isNaN(val) && val >= 0) {
-                await updateRecurringAmount(editingItem.id, val, amountScope === 'base');
+                await updateRecurringAmount(editingItem.id, val, amountScope);
                 setEditAmountModalVisible(false);
               }
             }
@@ -345,68 +1099,311 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
   },
+  periodBar: {
+    paddingVertical: 10,
+    paddingHorizontal: 16,
+    borderBottomWidth: 1,
+  },
   scrollContent: {
     padding: 16,
-    paddingBottom: 90,
+    paddingBottom: 95,
   },
   summaryCard: {
-    padding: 20,
-    marginBottom: 20,
+    padding: 18,
+    marginBottom: 14,
+    borderRadius: 16,
+  },
+  summaryHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
   },
   summaryTitle: {
     fontSize: 12,
-    fontWeight: '600',
+    fontWeight: '700',
     textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   summaryAmount: {
     fontSize: 28,
-    fontWeight: '800',
-    marginVertical: 6,
+    fontWeight: '900',
+    marginTop: 4,
+    marginBottom: 4,
+  },
+  payAllBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+    borderRadius: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  payAllBtnText: {
+    color: '#FFF',
+    fontSize: 12,
+    fontWeight: '700',
+    marginLeft: 4,
+  },
+  progressSection: {
+    marginTop: 10,
+    marginBottom: 8,
+  },
+  progressInfoRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 6,
+  },
+  progressInfoText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  progressPercentText: {
+    fontSize: 11,
+  },
+  progressBarTrack: {
+    height: 8,
+    borderRadius: 4,
+    overflow: 'hidden',
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 4,
   },
   statusRow: {
     flexDirection: 'row',
     borderTopWidth: 1,
-    paddingTop: 14,
+    paddingTop: 12,
     marginTop: 8,
   },
   statusCol: {
     flex: 1,
   },
   statusLabel: {
-    fontSize: 12,
-    marginBottom: 4,
+    fontSize: 11,
+    fontWeight: '600',
   },
   statusValue: {
-    fontSize: 16,
-    fontWeight: '700',
+    fontSize: 15,
+    fontWeight: '800',
   },
   divider: {
     width: 1,
     marginHorizontal: 12,
   },
-  sectionHeader: {
+  surplusRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderTopWidth: 1,
+    paddingTop: 12,
+    marginTop: 12,
+  },
+  searchBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 12,
+    borderWidth: 1,
     marginBottom: 12,
   },
-  sectionTitle: {
-    fontSize: 17,
+  searchInput: {
+    flex: 1,
+    fontSize: 13,
+    padding: 0,
+  },
+  typeTabBar: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 12,
+  },
+  typeTabBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 8,
+    borderRadius: 9,
+  },
+  typeTabBtnActive: {
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.15,
+    shadowRadius: 2,
+    elevation: 2,
+  },
+  typeTabText: {
+    fontSize: 12,
     fontWeight: '700',
   },
-  sectionSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
+  groupModesRow: {
+    marginBottom: 12,
   },
-  filterRow: {
+  groupModesLabel: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+    letterSpacing: 0.5,
+  },
+  groupModeChip: {
     flexDirection: 'row',
-    gap: 8,
-    marginBottom: 16,
-  },
-  filterPill: {
-    paddingHorizontal: 14,
+    alignItems: 'center',
+    paddingHorizontal: 12,
     paddingVertical: 7,
     borderRadius: 20,
+    borderWidth: 1,
   },
-  filterText: {
+  groupModeChipText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  vigenciaFilterRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: 12,
+  },
+  vigenciaPill: {
+    flex: 1,
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  vigenciaText: {
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  reorderBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 12,
+  },
+  reorderBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  reorderCloseBtn: {
+    backgroundColor: '#3B82F6',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    borderRadius: 6,
+    marginLeft: 8,
+  },
+  reorderCloseBtnText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  bucketBlock: {
+    marginBottom: 14,
+  },
+  bucketHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 14,
+    paddingVertical: 9,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  bucketTitle: {
     fontSize: 13,
+    fontWeight: '700',
+  },
+  bucketTotal: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  splitCard: {
+    padding: 14,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 14,
+  },
+  splitTitle: {
+    fontSize: 11,
+    fontWeight: '700',
+    textTransform: 'uppercase',
+    marginBottom: 8,
+  },
+  splitMultiBar: {
+    flexDirection: 'row',
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+    marginBottom: 10,
+  },
+  splitLegendRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  splitLegendItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  splitLegendDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 6,
+  },
+  splitLegendText: {
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  personHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 8,
+  },
+  personAvatar: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  personAvatarText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+  personName: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  personSubtitle: {
+    fontSize: 11,
+  },
+  personPayBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 16,
+  },
+  personPayBtnText: {
+    color: '#FFF',
+    fontSize: 11,
     fontWeight: '700',
   },
   fabWrap: {
@@ -422,31 +1419,17 @@ const styles = StyleSheet.create({
     shadowRadius: 8,
     elevation: 4,
   },
-  incomeSummaryRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    borderTopWidth: 1,
-    paddingTop: 12,
-    marginTop: 12,
-  },
-  periodBar: {
-    paddingVertical: 10,
-    paddingHorizontal: 16,
-    borderBottomWidth: 1,
-  },
   scopePill: {
-    flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
-    borderRadius: 8,
+    flexDirection: 'row',
+    paddingVertical: 11,
+    paddingHorizontal: 14,
+    borderRadius: 10,
     borderWidth: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
   },
   scopePillText: {
-    fontSize: 12,
+    fontSize: 13,
     fontWeight: '700',
-    textAlign: 'center',
   },
 });

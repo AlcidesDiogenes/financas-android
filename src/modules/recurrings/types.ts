@@ -20,6 +20,9 @@ export interface RecurringDebit {
   startDate?: string; // YYYY-MM (ex: '2026-01')
   endDate?: string;   // YYYY-MM (ex: '2026-12')
   updatedAt?: string;
+  paidAt?: string;    // Data em que foi pago na competência
+  orderIndex?: number; // Ordem personalizada de exibição
+  isPaused?: boolean;  // Pausado temporariamente
 }
 
 export interface RecurringMonthRecord {

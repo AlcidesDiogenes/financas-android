@@ -7,6 +7,7 @@ import {
   Animated,
   PanResponder,
   Alert,
+  Vibration,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { RecurringDebit } from '../types';
@@ -24,6 +25,12 @@ interface RecurringItemProps {
   onDelete?: (id: string) => void;
   canEdit?: boolean;
   showVigencia?: boolean;
+  selectedMonth?: number;
+  selectedYear?: number;
+  isReorderMode?: boolean;
+  onMoveUp?: () => void;
+  onMoveDown?: () => void;
+  onLongPress?: () => void;
 }
 
 export const RecurringItem: React.FC<RecurringItemProps> = ({
@@ -34,6 +41,12 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
   onDelete,
   canEdit = true,
   showVigencia = true,
+  selectedMonth,
+  selectedYear,
+  isReorderMode = false,
+  onMoveUp,
+  onMoveDown,
+  onLongPress,
 }) => {
   const { theme } = useTheme();
   const { swipePayDirection } = useSwipeAction();
@@ -41,6 +54,142 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
 
   const translateX = useRef(new Animated.Value(0)).current;
   const currentDx = useRef(0);
+  const longPressTimer = useRef<any>(null);
+
+  const urgencyInfo = useMemo(() => {
+    if (recurring.isPaused) {
+      return {
+        status: 'paused',
+        label: 'Pausada',
+        badgeLabel: 'Pausada',
+        variant: 'neutral' as const,
+        icon: 'pause-circle',
+        color: '#6B7280',
+      };
+    }
+
+    if (recurring.isPaidCurrentMonth) {
+      let paidLabel = recurring.type === 'income' ? 'Recebido' : 'Pago';
+      if (recurring.paidAt) {
+        try {
+          const d = new Date(recurring.paidAt);
+          const day = String(d.getDate()).padStart(2, '0');
+          const mon = String(d.getMonth() + 1).padStart(2, '0');
+          paidLabel = `${paidLabel} ${day}/${mon}`;
+        } catch {}
+      }
+      return {
+        status: 'paid',
+        label: paidLabel,
+        badgeLabel: paidLabel,
+        variant: 'success' as const,
+        icon: 'checkmark-circle',
+        color: theme.success,
+      };
+    }
+
+    const now = new Date();
+    const curMonth = now.getMonth() + 1;
+    const curYear = now.getFullYear();
+    const curDay = now.getDate();
+
+    const month = selectedMonth || curMonth;
+    const year = selectedYear || curYear;
+
+    const isCurrentCompetence = month === curMonth && year === curYear;
+    const isPastCompetence = year < curYear || (year === curYear && month < curMonth);
+    const isFutureCompetence = year > curYear || (year === curYear && month > curMonth);
+
+    const defaultBadgeLabel = recurring.type === 'income' ? 'A Receber' : 'Pendente';
+
+    if (isPastCompetence) {
+      return {
+        status: 'overdue',
+        label: recurring.type === 'income' ? 'Não Recebido' : 'Em Atraso',
+        badgeLabel: recurring.type === 'income' ? 'Não Recebido' : 'Atrasada',
+        variant: 'danger' as const,
+        icon: 'alert-circle',
+        color: '#EF4444',
+      };
+    }
+
+    if (isFutureCompetence) {
+      return {
+        status: 'future',
+        label: `${recurring.type === 'income' ? 'Recebe' : 'Vence'} dia ${recurring.dueDay}`,
+        badgeLabel: defaultBadgeLabel,
+        variant: 'warning' as const,
+        icon: 'calendar',
+        color: theme.textMuted,
+      };
+    }
+
+    // Competência atual
+    if (curDay > recurring.dueDay) {
+      const diff = curDay - recurring.dueDay;
+      const text = diff === 1 ? 'Venceu ontem' : `Venceu há ${diff}d`;
+      return {
+        status: 'overdue',
+        label: recurring.type === 'income' ? 'Atrasado' : text,
+        badgeLabel: recurring.type === 'income' ? 'Atrasado' : 'Atrasada',
+        variant: 'danger' as const,
+        icon: 'warning',
+        color: '#EF4444',
+      };
+    }
+
+    if (curDay === recurring.dueDay) {
+      return {
+        status: 'today',
+        label: recurring.type === 'income' ? 'Recebe Hoje!' : 'Vence Hoje!',
+        badgeLabel: recurring.type === 'income' ? 'Recebe Hoje' : 'Vence Hoje',
+        variant: 'warning' as const,
+        icon: 'flash',
+        color: '#F59E0B',
+      };
+    }
+
+    const diffToDue = recurring.dueDay - curDay;
+    if (diffToDue === 1) {
+      return {
+        status: 'soon',
+        label: `${recurring.type === 'income' ? 'Recebe' : 'Vence'} amanhã`,
+        badgeLabel: 'Vence Amanhã',
+        variant: 'warning' as const,
+        icon: 'time',
+        color: '#F59E0B',
+      };
+    }
+
+    if (diffToDue <= 5) {
+      return {
+        status: 'soon',
+        label: `Vence em ${diffToDue} dias`,
+        badgeLabel: defaultBadgeLabel,
+        variant: 'warning' as const,
+        icon: 'time',
+        color: '#F59E0B',
+      };
+    }
+
+    return {
+      status: 'upcoming',
+      label: `Vence dia ${recurring.dueDay}`,
+      badgeLabel: defaultBadgeLabel,
+      variant: 'warning' as const,
+      icon: 'calendar-outline',
+      color: theme.textMuted,
+    };
+  }, [
+    recurring.isPaused,
+    recurring.isPaidCurrentMonth,
+    recurring.paidAt,
+    recurring.dueDay,
+    recurring.type,
+    selectedMonth,
+    selectedYear,
+    theme,
+  ]);
 
   const vigenciaLabel = useMemo(() => {
     if (!showVigencia) return null;
@@ -64,9 +213,25 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
 
   const panResponder = useMemo(() => {
     return PanResponder.create({
-      onStartShouldSetPanResponder: () => false,
+      onStartShouldSetPanResponder: () => {
+        if (!canEdit || isReorderMode) return false;
+        if (onLongPress) {
+          if (longPressTimer.current) clearTimeout(longPressTimer.current);
+          longPressTimer.current = setTimeout(() => {
+            try {
+              Vibration.vibrate(50);
+            } catch {}
+            onLongPress();
+          }, 600);
+        }
+        return false;
+      },
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        if (!canEdit) return false;
+        if (!canEdit || isReorderMode) return false;
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
         // Só captura se o movimento horizontal for predominante e perceptível
         const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
         const hasMoved = Math.abs(gestureState.dx) > 10;
@@ -84,6 +249,10 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         return true;
       },
       onPanResponderMove: (_, gestureState) => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
         let dx = gestureState.dx;
         // Se arrastar para a direção de exclusão e não tiver onDelete, não deixa passar de 0
         if (swipePayDirection === 'right' && dx < 0 && !onDelete) {
@@ -98,6 +267,10 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = clampedDx;
       },
       onPanResponderRelease: () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
         const threshold = 65;
         const dx = currentDx.current;
 
@@ -144,6 +317,10 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = 0;
       },
       onPanResponderTerminate: () => {
+        if (longPressTimer.current) {
+          clearTimeout(longPressTimer.current);
+          longPressTimer.current = null;
+        }
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
@@ -152,7 +329,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = 0;
       },
     });
-  }, [canEdit, onDelete, swipePayDirection, recurring, onTogglePaid, translateX]);
+  }, [canEdit, isReorderMode, onDelete, onLongPress, swipePayDirection, recurring, onTogglePaid, translateX]);
 
   // Interpolações de opacidade para os fundos de ação
   const leftOpacity = translateX.interpolate({
@@ -248,6 +425,19 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>
               {recurring.title}
             </Text>
+            {recurring.isPaused ? (
+              <View style={[styles.urgencyTag, { backgroundColor: '#6B728020', borderColor: '#6B728040' }]}>
+                <Ionicons name="pause" size={10} color="#6B7280" style={{ marginRight: 3 }} />
+                <Text style={[styles.urgencyTagText, { color: '#6B7280' }]}>Pausada</Text>
+              </View>
+            ) : !recurring.isPaidCurrentMonth && (urgencyInfo.status === 'overdue' || urgencyInfo.status === 'today' || urgencyInfo.status === 'soon') ? (
+              <View style={[styles.urgencyTag, { backgroundColor: `${urgencyInfo.color}15`, borderColor: `${urgencyInfo.color}40` }]}>
+                <Ionicons name={urgencyInfo.icon as any} size={10} color={urgencyInfo.color} style={{ marginRight: 3 }} />
+                <Text style={[styles.urgencyTagText, { color: urgencyInfo.color }]}>
+                  {urgencyInfo.label}
+                </Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.subInfo}>
@@ -261,9 +451,12 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             {recurring.assignedTo ? (
               <>
                 <Text style={[styles.dot, { color: theme.textMuted }]}>•</Text>
-                <Text style={[styles.assignedBadge, { color: theme.primary }]}>
-                  👤 {recurring.assignedTo}
-                </Text>
+                <View style={[styles.assignedChip, { backgroundColor: `${theme.primary}12` }]}>
+                  <Ionicons name="person" size={10} color={theme.primary} style={{ marginRight: 3 }} />
+                  <Text style={[styles.assignedBadge, { color: theme.primary }]}>
+                    {recurring.assignedTo}
+                  </Text>
+                </View>
               </>
             ) : null}
           </View>
@@ -306,20 +499,12 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
               style={styles.badgeBtn}
             >
               <Badge
-                label={
-                  recurring.type === 'income'
-                    ? recurring.isPaidCurrentMonth
-                      ? 'Recebido'
-                      : 'A Receber'
-                    : recurring.isPaidCurrentMonth
-                    ? 'Pago'
-                    : 'Pendente'
-                }
-                variant={recurring.isPaidCurrentMonth ? 'success' : 'warning'}
+                label={urgencyInfo.badgeLabel}
+                variant={urgencyInfo.variant}
               />
             </TouchableOpacity>
 
-            {canEdit && onEditFull && (
+            {canEdit && onEditFull && !isReorderMode && (
               <TouchableOpacity
                 onPress={() => onEditFull(recurring)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -327,6 +512,27 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
               >
                 <Ionicons name="create-outline" size={17} color={theme.textMuted} />
               </TouchableOpacity>
+            )}
+
+            {isReorderMode && (
+              <View style={styles.reorderCol}>
+                <TouchableOpacity
+                  onPress={onMoveUp}
+                  disabled={!onMoveUp}
+                  style={[styles.reorderBtn, !onMoveUp && { opacity: 0.25 }]}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Ionicons name="chevron-up" size={17} color={theme.primary} />
+                </TouchableOpacity>
+                <TouchableOpacity
+                  onPress={onMoveDown}
+                  disabled={!onMoveDown}
+                  style={[styles.reorderBtn, !onMoveDown && { opacity: 0.25 }]}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                >
+                  <Ionicons name="chevron-down" size={17} color={theme.primary} />
+                </TouchableOpacity>
+              </View>
             )}
           </View>
         </View>
@@ -444,5 +650,36 @@ const styles = StyleSheet.create({
   },
   actionIconBtn: {
     padding: 3,
+  },
+  urgencyTag: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 6,
+    borderWidth: 1,
+    marginLeft: 6,
+  },
+  urgencyTagText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
+  assignedChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 5,
+    paddingVertical: 1,
+    borderRadius: 5,
+  },
+  reorderCol: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginLeft: 6,
+  },
+  reorderBtn: {
+    padding: 4,
+    borderRadius: 6,
+    backgroundColor: '#8B5CF618',
   },
 });

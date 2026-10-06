@@ -5,6 +5,7 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
+  Alert,
 } from 'react-native';
 import { useTheme } from '../core/theme/ThemeContext';
 import { usePrivacy } from '../core/theme/PrivacyContext';
@@ -14,13 +15,15 @@ import { formatCurrency } from '../core/utils/currency';
 import { getMonthLabel } from '../core/utils/date';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
+import { ModalContainer } from '../core/components/ModalContainer';
 import { TransactionItem } from '../modules/transactions/components/TransactionItem';
 import { RecurringItem } from '../modules/recurrings/components/RecurringItem';
-import { isRecurringActiveInMonth } from '../modules/recurrings/types';
+import { RecurringDebit, isRecurringActiveInMonth } from '../modules/recurrings/types';
 import { BudgetItem } from '../modules/budgets/components/BudgetItem';
 import { SpendingCharts } from '../core/components/SpendingCharts';
 import { AddTransactionModal } from '../modules/transactions/components/AddTransactionModal';
 import { PeriodSelector } from '../core/components/PeriodSelector';
+import { ExportService } from '../services/reports/ExportService';
 import { Ionicons } from '@expo/vector-icons';
 
 interface HomeScreenProps {
@@ -50,6 +53,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     setBalanceMode,
     toggleBalanceMode,
     transactions,
+    allTransactions,
     recurrings,
     budgetProgressList,
     selectedMonth,
@@ -61,6 +65,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addModalInitialMode, setAddModalInitialMode] = useState<'expense' | 'income' | 'saving'>('expense');
+  const [reportModalVisible, setReportModalVisible] = useState(false);
 
   const handleOpenAddModal = (mode: 'expense' | 'income' | 'saving' = 'expense') => {
     if (!canEdit) return;
@@ -76,6 +81,98 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const paidRecurringsCount = activeRecurrings.filter((r) => r.isPaidCurrentMonth).length;
   const totalRecurringsCount = activeRecurrings.length;
   const recentTransactions = transactions.slice(0, 4);
+
+  // Radar de Vencimentos inteligente
+  const now = new Date();
+  const currentRealDay = now.getDate();
+  const currentRealMonth = now.getMonth() + 1;
+  const currentRealYear = now.getFullYear();
+  const isCurrentCompetence = selectedMonth === currentRealMonth && selectedYear === currentRealYear;
+  const isPastCompetence = selectedYear < currentRealYear || (selectedYear === currentRealYear && selectedMonth < currentRealMonth);
+
+  const radarStats = useMemo(() => {
+    const overdue: RecurringDebit[] = [];
+    const dueToday: RecurringDebit[] = [];
+    const dueSoon: RecurringDebit[] = [];
+
+    activeRecurrings
+      .filter((r) => !r.isPaidCurrentMonth && !r.isPaused && r.type !== 'income')
+      .forEach((r) => {
+        if (isPastCompetence) {
+          overdue.push(r);
+        } else if (isCurrentCompetence) {
+          if (r.dueDay < currentRealDay) {
+            overdue.push(r);
+          } else if (r.dueDay === currentRealDay) {
+            dueToday.push(r);
+          } else if (r.dueDay <= currentRealDay + 3) {
+            dueSoon.push(r);
+          }
+        } else {
+          dueSoon.push(r);
+        }
+      });
+
+    const urgentList = [...overdue, ...dueToday, ...dueSoon];
+    const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
+    const todayAmount = dueToday.reduce((s, r) => s + r.amount, 0);
+
+    return {
+      overdue,
+      dueToday,
+      dueSoon,
+      urgentList,
+      overdueAmount,
+      todayAmount,
+      hasUrgent: overdue.length > 0 || dueToday.length > 0,
+      isAllPaid: activeRecurrings.length > 0 && pendingRecurrings.length === 0,
+    };
+  }, [activeRecurrings, pendingRecurrings.length, isPastCompetence, isCurrentCompetence, currentRealDay]);
+
+  // Fechamento de Contas do Espaço Compartilhado (Splitwise)
+  const householdSplit = useMemo(() => {
+    if (activeWorkspace.type !== 'shared') return null;
+
+    const map: Record<string, number> = {};
+    transactions
+      .filter((t) => t.type === 'expense')
+      .forEach((t) => {
+        const person = t.assignedTo ? t.assignedTo.trim() : 'Geral';
+        map[person] = (map[person] || 0) + t.amount;
+      });
+
+    activeRecurrings
+      .filter((r) => r.isPaidCurrentMonth && r.type !== 'income')
+      .forEach((r) => {
+        const person = r.assignedTo ? r.assignedTo.trim() : 'Geral';
+        map[person] = (map[person] || 0) + r.amount;
+      });
+
+    const entries = Object.entries(map).filter(([_, amount]) => amount > 0);
+    if (entries.length < 2) return null;
+
+    const total = entries.reduce((s, [_, a]) => s + a, 0);
+    const splits = entries
+      .map(([person, amount]) => ({
+        person,
+        total: amount,
+        percentage: total > 0 ? Math.round((amount / total) * 100) : 0,
+      }))
+      .sort((a, b) => b.total - a.total);
+
+    let suggestion = '';
+    if (splits.length === 2) {
+      const [p1, p2] = splits;
+      const diff = Math.abs(p1.total - p2.total) / 2;
+      if (diff > 0.01) {
+        suggestion = `Para dividir 50/50, ${p2.person} deve transferir ${formatCurrency(diff)} para ${p1.person}.`;
+      } else {
+        suggestion = `Os gastos estão perfeitamente equilibrados (50/50)! 🎉`;
+      }
+    }
+
+    return { total, splits, suggestion };
+  }, [activeWorkspace.type, transactions, activeRecurrings]);
 
   const categorySpendings = useMemo(() => {
     const map: Record<string, number> = {};
@@ -123,15 +220,14 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               <Text style={styles.wsPendingBadgeText}>{pendingRequestsCount}</Text>
             </View>
           )}
-          <Ionicons name="chevron-down" size={16} color={theme.textMuted} />
+          <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
         </TouchableOpacity>
 
         <View style={styles.topActions}>
-          {/* Privacy Eye Toggle */}
           <TouchableOpacity
             style={[styles.themeBtn, { backgroundColor: theme.surfaceVariant, marginRight: 8 }]}
             onPress={togglePrivacyMode}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel={isPrivacyMode ? 'Mostrar valores' : 'Ocultar valores'}
           >
             <Ionicons
               name={isPrivacyMode ? 'eye-off-outline' : 'eye-outline'}
@@ -140,16 +236,15 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             />
           </TouchableOpacity>
 
-          {/* Theme Toggle */}
           <TouchableOpacity
             style={[styles.themeBtn, { backgroundColor: theme.surfaceVariant }]}
             onPress={toggleTheme}
-            hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            accessibilityLabel="Alternar tema"
           >
             <Ionicons
-              name={isDark ? 'sunny' : 'moon'}
+              name={isDark ? 'sunny-outline' : 'moon-outline'}
               size={20}
-              color={isDark ? '#F59E0B' : theme.text}
+              color={theme.text}
             />
           </TouchableOpacity>
         </View>
@@ -159,44 +254,17 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
-        {/* Banner de Notificação: Solicitações de Entrada Pendentes */}
-        {pendingRequestsCount > 0 && (
-          <TouchableOpacity
-            style={[
-              styles.pendingBanner,
-              { backgroundColor: '#F59E0B18', borderColor: '#F59E0B44' },
-            ]}
-            onPress={onNavigateToWorkspaces}
-            activeOpacity={0.8}
-          >
-            <View style={[styles.pendingBannerIconWrap, { backgroundColor: '#F59E0B' }]}>
-              <Ionicons name="notifications" size={17} color="#FFF" />
-            </View>
-            <View style={styles.pendingBannerTextWrap}>
-              <Text style={[styles.pendingBannerTitle, { color: theme.text }]}>
-                {pendingRequestsCount === 1
-                  ? '1 Solicitação de Entrada Pendente'
-                  : `${pendingRequestsCount} Solicitações de Entrada`}
-              </Text>
-              <Text style={[styles.pendingBannerSubtitle, { color: theme.textMuted }]}>
-                Toque para aprovar ou recusar o acesso ao seu espaço
-              </Text>
-            </View>
-            <Ionicons name="chevron-forward" size={18} color="#F59E0B" />
-          </TouchableOpacity>
-        )}
-
-        {/* Month Navigator */}
+        {/* Period Selector Bar */}
         <View style={styles.periodRow}>
-          <PeriodSelector compact />
+          <PeriodSelector />
         </View>
 
-        {/* Hero Card: Balance & Summary */}
+        {/* Hero Balance Card */}
         <Card variant="elevated" style={styles.heroCard}>
-          {/* Header do Card com Seletor Rápido de Modo de Saldo */}
           <View style={styles.heroCardHeaderRow}>
             <Text style={[styles.balanceLabel, { color: theme.textMuted }]}>
-              {balanceMode === 'realized' ? 'Saldo Realizado (Caixa)' : 'Saldo Previsto do Mês'}
+              Saldo {balanceMode === 'realized' ? 'Realizado' : 'Previsto'} (
+              {getMonthLabel(selectedMonth, selectedYear)})
             </Text>
 
             <View style={[styles.balanceModeToggle, { backgroundColor: theme.surfaceVariant }]}>
@@ -309,13 +377,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
                   disabled={!canEdit}
                 >
                   <View style={styles.statIconRow}>
-                    <Ionicons name="wallet-outline" size={15} color="#3B82F6" />
+                    <Ionicons name="shield-checkmark" size={15} color={theme.primary} />
                     <Text style={[styles.statLabel, { color: theme.textMuted }]}>
-                      Economia
+                      Poupado
                     </Text>
                   </View>
-                  <Text style={[styles.statValue, { color: '#3B82F6' }]}>
-                    {formatPrivateCurrency(monthlySummary.totalSavedInMonth, formatCurrency(monthlySummary.totalSavedInMonth))}
+                  <Text style={[styles.statValue, { color: theme.primary }]}>
+                    {formatPrivateCurrency(
+                      monthlySummary.totalSavedInMonth,
+                      formatCurrency(monthlySummary.totalSavedInMonth)
+                    )}
                   </Text>
                 </TouchableOpacity>
               </View>
@@ -371,50 +442,207 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           )}
         </Card>
 
-        {/* Quick Actions */}
-        {canEdit && (
-          <View style={styles.quickActionsRow}>
+        {/* Quick Actions Row */}
+        <View style={styles.quickActionsRow}>
+          {canEdit && (
             <Button
               title="Novo Lançamento"
               icon={<Ionicons name="add-circle" size={18} color="#FFF" />}
               onPress={() => handleOpenAddModal('expense')}
-              style={{ flex: 1 }}
+              style={{ flex: 1, marginRight: 8 }}
             />
+          )}
+          <TouchableOpacity
+            style={[styles.reportBtn, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}
+            onPress={() => setReportModalVisible(true)}
+            activeOpacity={0.7}
+          >
+            <Ionicons name="share-social-outline" size={18} color={theme.primary} />
+            <Text style={[styles.reportBtnText, { color: theme.primary }]}>Relatório</Text>
+          </TouchableOpacity>
+        </View>
+
+        {/* ======================================================== */}
+        {/* RADAR DE VENCIMENTOS INTELIGENTE                        */}
+        {/* ======================================================== */}
+        {radarStats.hasUrgent && (
+          <Card
+            variant="elevated"
+            style={[
+              styles.radarCard,
+              {
+                borderColor: radarStats.overdue.length > 0 ? '#EF4444' : '#F59E0B',
+                backgroundColor: theme.card,
+              },
+            ]}
+          >
+            <View style={styles.radarHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons
+                  name={radarStats.overdue.length > 0 ? 'alert-circle' : 'flash'}
+                  size={20}
+                  color={radarStats.overdue.length > 0 ? '#EF4444' : '#F59E0B'}
+                  style={{ marginRight: 6 }}
+                />
+                <Text
+                  style={[
+                    styles.radarTitle,
+                    { color: radarStats.overdue.length > 0 ? '#EF4444' : '#F59E0B' },
+                  ]}
+                >
+                  Radar de Vencimentos
+                </Text>
+              </View>
+              <TouchableOpacity onPress={onNavigateToRecurrings}>
+                <Text style={[styles.radarSeeAll, { color: theme.primary }]}>Ver Todas</Text>
+              </TouchableOpacity>
+            </View>
+
+            {radarStats.overdue.length > 0 && (
+              <View style={[styles.radarBadgeRow, { backgroundColor: '#EF444415' }]}>
+                <Ionicons name="warning-outline" size={15} color="#EF4444" />
+                <Text style={[styles.radarBadgeText, { color: '#EF4444' }]}>
+                  {radarStats.overdue.length} {radarStats.overdue.length === 1 ? 'conta atrasada' : 'contas atrasadas'} ({formatCurrency(radarStats.overdueAmount)})
+                </Text>
+              </View>
+            )}
+
+            {radarStats.dueToday.length > 0 && (
+              <View style={[styles.radarBadgeRow, { backgroundColor: '#F59E0B15', marginTop: 6 }]}>
+                <Ionicons name="time-outline" size={15} color="#F59E0B" />
+                <Text style={[styles.radarBadgeText, { color: '#F59E0B' }]}>
+                  {radarStats.dueToday.length} {radarStats.dueToday.length === 1 ? 'conta vence HOJE!' : 'contas vencem HOJE!'} ({formatCurrency(radarStats.todayAmount)})
+                </Text>
+              </View>
+            )}
+
+            <View style={{ marginTop: 10 }}>
+              {radarStats.urgentList.slice(0, 3).map((item) => (
+                <RecurringItem
+                  key={item.id}
+                  recurring={item}
+                  onTogglePaid={toggleRecurringPaid}
+                  canEdit={canEdit}
+                  showVigencia={false}
+                  selectedMonth={selectedMonth}
+                  selectedYear={selectedYear}
+                />
+              ))}
+            </View>
+          </Card>
+        )}
+
+        {radarStats.isAllPaid && (
+          <View style={[styles.allPaidBanner, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
+            <Ionicons name="checkmark-circle" size={22} color="#10B981" />
+            <View style={{ flex: 1, marginLeft: 10 }}>
+              <Text style={[styles.allPaidTitle, { color: '#10B981' }]}>
+                Contas em dia! 🎉
+              </Text>
+              <Text style={[styles.allPaidSub, { color: theme.textMuted }]}>
+                Todas as contas fixas de {getMonthLabel(selectedMonth, selectedYear)} foram pagas.
+              </Text>
+            </View>
           </View>
         )}
 
-        {/* Interactive Spending Breakdown Charts */}
+        {/* ======================================================== */}
+        {/* ACERTO DE CONTAS DO ESPAÇO COMPARTILHADO (SPLITWISE)     */}
+        {/* ======================================================== */}
+        {householdSplit && (
+          <Card variant="flat" style={[styles.splitCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <View style={styles.splitHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="people" size={18} color={theme.primary} style={{ marginRight: 6 }} />
+                <Text style={[styles.splitTitle, { color: theme.text }]}>
+                  Acerto de Contas da Casa
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => {
+                  ExportService.shareHouseholdSplitText({
+                    workspaceName: activeWorkspace.name,
+                    monthLabel: getMonthLabel(selectedMonth, selectedYear),
+                    totalExpense: householdSplit.total,
+                    personSplits: householdSplit.splits,
+                    settlementSuggestion: householdSplit.suggestion,
+                  });
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                  <Ionicons name="logo-whatsapp" size={14} color="#10B981" style={{ marginRight: 4 }} />
+                  <Text style={{ fontSize: 11, fontWeight: '700', color: '#10B981' }}>Enviar</Text>
+                </View>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.splitMembersList}>
+              {householdSplit.splits.map((s, idx) => (
+                <View key={s.person} style={styles.splitMemberRow}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <View
+                      style={[
+                        styles.splitMemberDot,
+                        { backgroundColor: idx === 0 ? theme.primary : '#EC4899' },
+                      ]}
+                    />
+                    <Text style={[styles.splitMemberName, { color: theme.text }]}>{s.person}</Text>
+                  </View>
+                  <Text style={[styles.splitMemberAmount, { color: theme.text }]}>
+                    {formatCurrency(s.total)} ({s.percentage}%)
+                  </Text>
+                </View>
+              ))}
+            </View>
+
+            {householdSplit.suggestion && (
+              <View style={[styles.suggestionBox, { backgroundColor: theme.surfaceVariant }]}>
+                <Ionicons name="swap-horizontal" size={16} color={theme.primary} style={{ marginRight: 6 }} />
+                <Text style={[styles.suggestionText, { color: theme.text }]}>
+                  {householdSplit.suggestion}
+                </Text>
+              </View>
+            )}
+          </Card>
+        )}
+
+        {/* Interactive Spending Breakdown Charts with 6-Month Evolution */}
         <SpendingCharts
           categorySpendings={categorySpendings}
           totalExpense={monthlySummary.totalExpense}
+          allTransactions={allTransactions}
         />
 
-        {/* Recurrings to pay alert */}
-        {pendingRecurrings.length > 0 && (
-          <View style={styles.sectionHeader}>
-            <View>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                Contas a Vencer no Mês
-              </Text>
-              <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
-                {pendingRecurrings.length} débitos pendentes de pagamento
-              </Text>
+        {/* Recurrings to pay preview (fallback se não houver urgente) */}
+        {!radarStats.hasUrgent && pendingRecurrings.length > 0 && (
+          <>
+            <View style={styles.sectionHeader}>
+              <View>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  Contas a Vencer no Mês
+                </Text>
+                <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
+                  {pendingRecurrings.length} débitos pendentes de pagamento
+                </Text>
+              </View>
+              <TouchableOpacity onPress={onNavigateToRecurrings}>
+                <Text style={[styles.seeAllText, { color: theme.primary }]}>Ver Todas</Text>
+              </TouchableOpacity>
             </View>
-            <TouchableOpacity onPress={onNavigateToRecurrings}>
-              <Text style={[styles.seeAllText, { color: theme.primary }]}>Ver Todas</Text>
-            </TouchableOpacity>
-          </View>
-        )}
 
-        {pendingRecurrings.slice(0, 3).map((item) => (
-          <RecurringItem
-            key={item.id}
-            recurring={item}
-            onTogglePaid={toggleRecurringPaid}
-            canEdit={canEdit}
-            showVigencia={false}
-          />
-        ))}
+            {pendingRecurrings.slice(0, 3).map((item) => (
+              <RecurringItem
+                key={item.id}
+                recurring={item}
+                onTogglePaid={toggleRecurringPaid}
+                canEdit={canEdit}
+                showVigencia={false}
+                selectedMonth={selectedMonth}
+                selectedYear={selectedYear}
+              />
+            ))}
+          </>
+        )}
 
         {/* Budgets Preview */}
         {budgetProgressList.length > 0 && (
@@ -483,6 +711,87 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         onClose={() => setAddModalVisible(false)}
         onSubmit={addTransaction}
       />
+
+      {/* Relatório Mensal & Compartilhamento Modal */}
+      <ModalContainer
+        visible={reportModalVisible}
+        onClose={() => setReportModalVisible(false)}
+        title={`Resumo: ${getMonthLabel(selectedMonth, selectedYear)}`}
+      >
+        <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 14 }}>
+          Compartilhe ou exporte o relatório financeiro consolidado desta competência:
+        </Text>
+
+        <Card variant="flat" style={{ padding: 14, marginBottom: 16, backgroundColor: theme.surfaceVariant }}>
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={{ fontSize: 13, color: theme.text }}>🟢 Receitas Totais:</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: theme.success }}>
+              {formatCurrency(monthlySummary.totalIncome)}
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+            <Text style={{ fontSize: 13, color: theme.text }}>🔴 Despesas Totais:</Text>
+            <Text style={{ fontSize: 14, fontWeight: '700', color: theme.danger }}>
+              {formatCurrency(monthlySummary.totalExpense)}
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 8 }}>
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>💰 Saldo do Mês:</Text>
+            <Text
+              style={{
+                fontSize: 15,
+                fontWeight: '800',
+                color: monthlySummary.balance >= 0 ? theme.success : theme.danger,
+              }}
+            >
+              {formatCurrency(monthlySummary.balance)}
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+            <Text style={{ fontSize: 12, color: theme.textMuted }}>📋 Contas Fixas:</Text>
+            <Text style={{ fontSize: 12, color: theme.textMuted }}>
+              {paidRecurringsCount} pagas • {pendingRecurrings.length} pendentes
+            </Text>
+          </View>
+        </Card>
+
+        <Button
+          title="Compartilhar no WhatsApp"
+          icon={<Ionicons name="logo-whatsapp" size={18} color="#FFF" />}
+          onPress={async () => {
+            await ExportService.shareMonthlySummaryText({
+              monthLabel: getMonthLabel(selectedMonth, selectedYear),
+              totalIncome: monthlySummary.totalIncome,
+              totalExpense: monthlySummary.totalExpense,
+              balance: monthlySummary.balance,
+              topCategories: categorySpendings.map((c) => ({ category: c.category, total: c.total })),
+              recurringsPaidCount: paidRecurringsCount,
+              recurringsPendingCount: pendingRecurrings.length,
+            });
+            setReportModalVisible(false);
+          }}
+          style={{ marginBottom: 10, backgroundColor: '#10B981' }}
+        />
+
+        <Button
+          title="Exportar Planilha (CSV)"
+          icon={<Ionicons name="document-text-outline" size={18} color="#FFF" />}
+          variant="secondary"
+          onPress={async () => {
+            const ok = await ExportService.exportTransactionsToCSV(
+              transactions,
+              getMonthLabel(selectedMonth, selectedYear)
+            );
+            if (!ok) {
+              Alert.alert('Aviso', 'Não foi possível gerar a planilha no momento.');
+            }
+            setReportModalVisible(false);
+          }}
+        />
+      </ModalContainer>
     </View>
   );
 };
@@ -542,10 +851,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     marginBottom: 12,
   },
-  periodText: {
-    fontSize: 20,
-    fontWeight: '800',
-  },
   heroCard: {
     padding: 20,
     marginBottom: 16,
@@ -600,23 +905,23 @@ const styles = StyleSheet.create({
     marginLeft: 4,
   },
   statValue: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '700',
   },
   statDivider: {
     width: 1,
-    marginHorizontal: 12,
+    marginHorizontal: 8,
   },
   projectionBox: {
     flexDirection: 'row',
     alignItems: 'center',
     padding: 12,
     borderRadius: 12,
-    marginTop: 16,
+    marginTop: 14,
   },
   projectionTextWrap: {
-    marginLeft: 10,
     flex: 1,
+    marginHorizontal: 8,
   },
   projectionTitle: {
     fontSize: 12,
@@ -627,7 +932,121 @@ const styles = StyleSheet.create({
     marginTop: 2,
   },
   quickActionsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     marginBottom: 16,
+  },
+  reportBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+  },
+  reportBtnText: {
+    fontSize: 13,
+    fontWeight: '700',
+    marginLeft: 6,
+  },
+  radarCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1.5,
+    marginBottom: 16,
+  },
+  radarHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 10,
+  },
+  radarTitle: {
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  radarSeeAll: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  radarBadgeRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 8,
+    gap: 6,
+  },
+  radarBadgeText: {
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  allPaidBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  allPaidTitle: {
+    fontSize: 13,
+    fontWeight: '800',
+  },
+  allPaidSub: {
+    fontSize: 11,
+    marginTop: 2,
+  },
+  splitCard: {
+    padding: 16,
+    borderRadius: 16,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  splitHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 12,
+  },
+  splitTitle: {
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  splitMembersList: {
+    gap: 8,
+    marginBottom: 10,
+  },
+  splitMemberRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  splitMemberDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    marginRight: 8,
+  },
+  splitMemberName: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  splitMemberAmount: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  suggestionBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 10,
+    marginTop: 4,
+  },
+  suggestionText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '600',
   },
   sectionHeader: {
     flexDirection: 'row',
@@ -662,32 +1081,5 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 10,
     fontWeight: '800',
-  },
-  pendingBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 12,
-    borderRadius: 14,
-    borderWidth: 1,
-    marginBottom: 12,
-    gap: 10,
-  },
-  pendingBannerIconWrap: {
-    width: 32,
-    height: 32,
-    borderRadius: 16,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pendingBannerTextWrap: {
-    flex: 1,
-  },
-  pendingBannerTitle: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  pendingBannerSubtitle: {
-    fontSize: 11,
-    marginTop: 2,
   },
 });

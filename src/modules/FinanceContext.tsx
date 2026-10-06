@@ -44,8 +44,14 @@ interface FinanceContextType {
   deleteTransaction: (id: string) => Promise<void>;
   addRecurring: (rec: Omit<RecurringDebit, 'id' | 'workspaceId' | 'isPaidCurrentMonth' | 'createdAt'>) => Promise<void>;
   updateRecurring: (rec: RecurringDebit) => Promise<void>;
-  updateRecurringAmount: (id: string, newAmount: number, updateBaseAllMonths?: boolean) => Promise<void>;
+  updateRecurringAmount: (
+    id: string,
+    newAmount: number,
+    scope?: 'month' | 'forward' | 'base' | boolean
+  ) => Promise<void>;
   toggleRecurringPaid: (id: string) => Promise<void>;
+  batchSetRecurringsPaid: (ids: string[], isPaid: boolean) => Promise<void>;
+  reorderRecurrings: (reordered: RecurringDebit[]) => Promise<void>;
   deleteRecurring: (id: string) => Promise<void>;
   saveBudget: (
     category: Budget['category'],
@@ -159,6 +165,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           ...r,
           amount: monthRec ? monthRec.amount : r.amount,
           isPaidCurrentMonth: monthRec ? monthRec.isPaid : false,
+          paidAt: monthRec?.paidAt,
         };
       });
   }, [allRecurrings, allRecurringMonthRecords, activeWorkspace.id, selectedMonth, selectedYear]);
@@ -353,21 +360,39 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const updateRecurringAmount = async (
     id: string,
     newAmount: number,
-    updateBaseAllMonths: boolean = false
+    scope: 'month' | 'forward' | 'base' | boolean = 'month'
   ) => {
-    if (updateBaseAllMonths) {
-      // Updates base amount for all months
+    const normalizedScope: 'month' | 'forward' | 'base' =
+      typeof scope === 'boolean'
+        ? (scope ? 'base' : 'month')
+        : (scope || 'month');
+
+    const target = allRecurrings.find((r) => r.id === id);
+    if (!target) return;
+
+    if (normalizedScope === 'base') {
+      // 1. Updates base amount globally for all months
       const updated = await RecurringRepository.updateAmount(id, newAmount);
       setAllRecurrings(updated);
       const item = updated.find((r) => r.id === id);
       if (item) {
         await CloudSyncService.autoUpsertRecurring(item);
       }
-    } else {
-      // Updates only for the selected competence
-      const target = allRecurrings.find((r) => r.id === id);
-      if (!target) return;
-
+      // If current month had a record, sync it
+      const existing = allRecurringMonthRecords.find(
+        (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
+      );
+      if (existing?.isPaid && existing.transactionId) {
+        const tx = allTransactions.find((t) => t.id === existing.transactionId);
+        if (tx) {
+          const updatedTx = { ...tx, amount: newAmount };
+          await TransactionRepository.update(updatedTx);
+          setAllTransactions((prev) => prev.map((t) => (t.id === tx.id ? updatedTx : t)));
+          await CloudSyncService.autoUpsertTransaction(updatedTx);
+        }
+      }
+    } else if (normalizedScope === 'month') {
+      // 2. Updates only for the selected competence
       const existing = allRecurringMonthRecords.find(
         (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
       );
@@ -398,6 +423,69 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const updatedMonthRecords = await RecurringMonthRepository.upsert(monthRecord);
       setAllRecurringMonthRecords(updatedMonthRecords);
       await CloudSyncService.autoUpsertRecurringMonthRecord(monthRecord);
+    } else if (normalizedScope === 'forward') {
+      // 3. A partir deste mês em diante:
+      // Preserva o valor antigo nos meses anteriores e cria o novo valor a partir de agora
+      let prevYear = selectedYear;
+      let prevMonth = selectedMonth - 1;
+      if (prevMonth < 1) {
+        prevMonth = 12;
+        prevYear -= 1;
+      }
+      const prevCompFormatted = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+      const currentCompFormatted = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+
+      // A conta original encerra a vigência no mês anterior
+      const updatedOldRec: RecurringDebit = {
+        ...target,
+        endDate: prevCompFormatted,
+        updatedAt: new Date().toISOString(),
+      };
+      await RecurringRepository.update(updatedOldRec);
+      await CloudSyncService.autoUpsertRecurring(updatedOldRec);
+
+      // A nova conta com o novo valor começa na competência selecionada
+      const newRec: RecurringDebit = {
+        ...target,
+        id: `rec-${Date.now()}`,
+        amount: newAmount,
+        startDate: currentCompFormatted,
+        endDate: target.endDate && target.endDate > currentCompFormatted ? target.endDate : undefined,
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+      };
+      await RecurringRepository.add(newRec);
+      await CloudSyncService.autoUpsertRecurring(newRec);
+
+      // Se a conta atual já tinha sido paga neste mês, vincula o monthRecord à nova conta
+      const existing = allRecurringMonthRecords.find(
+        (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
+      );
+      if (existing) {
+        const newMonthRecord: RecurringMonthRecord = {
+          ...existing,
+          id: `${newRec.id}-${selectedYear}-${selectedMonth}`,
+          recurringId: newRec.id,
+          amount: newAmount,
+        };
+        await RecurringMonthRepository.upsert(newMonthRecord);
+        await CloudSyncService.autoUpsertRecurringMonthRecord(newMonthRecord);
+
+        if (existing.isPaid && existing.transactionId) {
+          const tx = allTransactions.find((t) => t.id === existing.transactionId);
+          if (tx) {
+            const updatedTx = { ...tx, amount: newAmount };
+            await TransactionRepository.update(updatedTx);
+            setAllTransactions((prev) => prev.map((t) => (t.id === tx.id ? updatedTx : t)));
+            await CloudSyncService.autoUpsertTransaction(updatedTx);
+          }
+        }
+      }
+
+      setAllRecurrings((prev) => [
+        ...prev.map((r) => (r.id === target.id ? updatedOldRec : r)),
+        newRec,
+      ]);
     }
   };
 
@@ -460,6 +548,37 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const updatedMonthRecords = await RecurringMonthRepository.upsert(monthRecord);
     setAllRecurringMonthRecords(updatedMonthRecords);
     await CloudSyncService.autoUpsertRecurringMonthRecord(monthRecord);
+  };
+
+  const batchSetRecurringsPaid = async (ids: string[], isPaid: boolean) => {
+    for (const id of ids) {
+      const existing = allRecurringMonthRecords.find(
+        (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
+      );
+      const currentlyPaid = existing ? existing.isPaid : false;
+      if (currentlyPaid !== isPaid) {
+        await toggleRecurringPaid(id);
+      }
+    }
+  };
+
+  const reorderRecurrings = async (reordered: RecurringDebit[]) => {
+    const updatedWithOrder = reordered.map((r, idx) => ({
+      ...r,
+      orderIndex: idx,
+    }));
+    const updatedAll = allRecurrings.map((r) => {
+      const match = updatedWithOrder.find((item) => item.id === r.id);
+      return match ? match : r;
+    });
+    setAllRecurrings(updatedAll);
+    await RecurringRepository.saveAll(updatedAll);
+    try {
+      const client = await SupabaseService.getClient();
+      for (const item of updatedWithOrder) {
+        await client.from('recurrings').update({ order_index: item.orderIndex }).eq('id', item.id);
+      }
+    } catch {}
   };
 
   const deleteRecurring = async (id: string) => {
@@ -647,6 +766,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateRecurring,
         updateRecurringAmount,
         toggleRecurringPaid,
+        batchSetRecurringsPaid,
+        reorderRecurrings,
         deleteRecurring,
         saveBudget,
         deleteBudget,
