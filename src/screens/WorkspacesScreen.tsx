@@ -36,7 +36,9 @@ export const WorkspacesScreen: React.FC = () => {
     updateMemberRole,
     removeMember,
     renameWorkspace,
+    transferOwnership,
     deleteWorkspace,
+    leaveWorkspace,
     joinWorkspaceByCode,
     currentUserRole,
   } = useWorkspace();
@@ -44,22 +46,27 @@ export const WorkspacesScreen: React.FC = () => {
   // Rename Workspace Modal
   const [renameModalVisible, setRenameModalVisible] = useState(false);
   const [renameValue, setRenameValue] = useState('');
+  const [renameError, setRenameError] = useState('');
 
   // Create Workspace Modal
   const [createModalVisible, setCreateModalVisible] = useState(false);
   const [newWsName, setNewWsName] = useState('');
   const [newWsDesc, setNewWsDesc] = useState('');
   const [newWsIsShared, setNewWsIsShared] = useState(true);
+  const [newWsNameError, setNewWsNameError] = useState('');
 
   // Join Workspace Modal
   const [joinModalVisible, setJoinModalVisible] = useState(false);
   const [joinCode, setJoinCode] = useState('');
+  const [joinCodeError, setJoinCodeError] = useState('');
 
   // Add Member Modal
   const [memberModalVisible, setMemberModalVisible] = useState(false);
   const [memberName, setMemberName] = useState('');
   const [memberEmail, setMemberEmail] = useState('');
   const [memberRole, setMemberRole] = useState<WorkspaceRole>('editor');
+  const [memberNameError, setMemberNameError] = useState('');
+  const [memberEmailError, setMemberEmailError] = useState('');
 
   const isSolo = activeWorkspace.type === 'solo';
 
@@ -102,8 +109,10 @@ export const WorkspacesScreen: React.FC = () => {
 
   const handleCreateWorkspace = async () => {
     if (!newWsName.trim()) {
+      setNewWsNameError('Informe o nome do espaço');
       return;
     }
+    setNewWsNameError('');
     await createWorkspace(newWsName.trim(), newWsDesc.trim(), newWsIsShared);
     setNewWsName('');
     setNewWsDesc('');
@@ -111,21 +120,42 @@ export const WorkspacesScreen: React.FC = () => {
   };
 
   const handleJoinWorkspace = async () => {
-    if (!joinCode.trim()) return;
+    if (!joinCode.trim()) {
+      setJoinCodeError('Informe o código do convite');
+      return;
+    }
+    setJoinCodeError('');
     const res = await joinWorkspaceByCode(joinCode.trim());
     if (res.success) {
       Alert.alert('Sucesso!', res.message);
       setJoinCode('');
       setJoinModalVisible(false);
     } else {
-      Alert.alert('Aviso', res.message);
+      setJoinCodeError(res.message);
     }
   };
 
   const handleAddMember = async () => {
-    if (!memberName.trim() || !memberEmail.trim()) {
-      return;
+    let hasErr = false;
+    if (!memberName.trim()) {
+      setMemberNameError('Informe o nome do convidado');
+      hasErr = true;
+    } else {
+      setMemberNameError('');
     }
+
+    if (!memberEmail.trim()) {
+      setMemberEmailError('Informe o e-mail');
+      hasErr = true;
+    } else if (!memberEmail.includes('@') || !memberEmail.includes('.')) {
+      setMemberEmailError('Informe um e-mail válido');
+      hasErr = true;
+    } else {
+      setMemberEmailError('');
+    }
+
+    if (hasErr) return;
+
     await addMember(activeWorkspace.id, memberName.trim(), memberEmail.trim(), memberRole);
     setMemberName('');
     setMemberEmail('');
@@ -133,9 +163,69 @@ export const WorkspacesScreen: React.FC = () => {
     setMemberModalVisible(false);
   };
 
-  const handleToggleRole = async (memberId: string, currentRole: WorkspaceRole) => {
-    const nextRole: WorkspaceRole = currentRole === 'editor' ? 'viewer' : 'editor';
-    await updateMemberRole(activeWorkspace.id, memberId, nextRole);
+  const handleLeaveWorkspace = () => {
+    Alert.alert(
+      'Sair do Espaço?',
+      `Tem certeza que deseja sair do espaço "${activeWorkspace.name}"?\n\nVocê deixará de ter acesso aos lançamentos deste espaço. Se precisar voltar no futuro, o proprietário precisará lhe fornecer um novo convite.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sair do Espaço',
+          style: 'destructive',
+          onPress: async () => {
+            const res = await leaveWorkspace(activeWorkspace.id);
+            if (res.success) {
+              Alert.alert('Sucesso', res.message);
+            } else {
+              Alert.alert('Aviso', res.message);
+            }
+          },
+        },
+      ]
+    );
+  };
+
+  const handleManageMemberRole = (member: { id: string; name: string; email: string; role: WorkspaceRole }) => {
+    if (currentUserRole !== 'owner') return;
+
+    Alert.alert(
+      `Permissões de ${member.name}`,
+      `Escolha o nível de acesso ou transfira a titularidade do espaço:`,
+      [
+        {
+          text: member.role === 'editor' ? 'Mudar para: Apenas Ver 👁️' : 'Mudar para: Pode Editar ✏️',
+          onPress: async () => {
+            const nextRole: WorkspaceRole = member.role === 'editor' ? 'viewer' : 'editor';
+            await updateMemberRole(activeWorkspace.id, member.id, nextRole);
+          },
+        },
+        {
+          text: '👑 Transferir Propriedade',
+          onPress: () => {
+            Alert.alert(
+              'Transferir Propriedade do Espaço?',
+              `Deseja transferir a titularidade de "${activeWorkspace.name}" para ${member.name} (${member.email})?\n\nVocê deixará de ser o proprietário e passará a ser um membro editor. Apenas o novo proprietário poderá gerenciar o espaço ou excluí-lo.`,
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Confirmar Transferência',
+                  style: 'destructive',
+                  onPress: async () => {
+                    const res = await transferOwnership(activeWorkspace.id, member.email);
+                    if (res.success) {
+                      Alert.alert('Sucesso 🎉', res.message);
+                    } else {
+                      Alert.alert('Aviso', res.message);
+                    }
+                  },
+                },
+              ]
+            );
+          },
+        },
+        { text: 'Cancelar', style: 'cancel' },
+      ]
+    );
   };
 
   const handleConfirmRemoveMember = (memberId: string, memberName: string) => {
@@ -333,19 +423,32 @@ export const WorkspacesScreen: React.FC = () => {
             </View>
           )}
 
-          {/* Opção de Excluir Espaço (Apenas espaços criados, nunca o pessoal) */}
+          {/* Ações de Espaço Compartilhado: Excluir (somente Proprietário) ou Sair (Membros convidados) */}
           {!isSolo && activeWorkspace.id !== 'ws-solo' && (
             <View style={[styles.dangerArea, { borderTopColor: theme.border }]}>
-              <TouchableOpacity
-                onPress={handleDeleteWorkspace}
-                style={styles.deleteWsBtn}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="trash-outline" size={15} color={theme.danger} style={{ marginRight: 6 }} />
-                <Text style={[styles.deleteWsText, { color: theme.danger }]}>
-                  Excluir este Espaço
-                </Text>
-              </TouchableOpacity>
+              {currentUserRole === 'owner' ? (
+                <TouchableOpacity
+                  onPress={handleDeleteWorkspace}
+                  style={styles.deleteWsBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="trash-outline" size={15} color={theme.danger} style={{ marginRight: 6 }} />
+                  <Text style={[styles.deleteWsText, { color: theme.danger }]}>
+                    Excluir este Espaço (Apenas Proprietário)
+                  </Text>
+                </TouchableOpacity>
+              ) : (
+                <TouchableOpacity
+                  onPress={handleLeaveWorkspace}
+                  style={styles.deleteWsBtn}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="log-out-outline" size={15} color={theme.danger} style={{ marginRight: 6 }} />
+                  <Text style={[styles.deleteWsText, { color: theme.danger }]}>
+                    Sair deste Espaço Compartilhado
+                  </Text>
+                </TouchableOpacity>
+              )}
             </View>
           )}
         </Card>
@@ -412,9 +515,9 @@ export const WorkspacesScreen: React.FC = () => {
                     <View style={styles.memberActions}>
                       {member.role === 'owner' ? (
                         <Badge label="Proprietário" variant="primary" />
-                      ) : (
+                      ) : currentUserRole === 'owner' ? (
                         <TouchableOpacity
-                          onPress={() => handleToggleRole(member.id, member.role)}
+                          onPress={() => handleManageMemberRole(member)}
                           activeOpacity={0.7}
                         >
                           <Badge
@@ -422,9 +525,14 @@ export const WorkspacesScreen: React.FC = () => {
                             variant={member.role === 'editor' ? 'success' : 'neutral'}
                           />
                         </TouchableOpacity>
+                      ) : (
+                        <Badge
+                          label={member.role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️'}
+                          variant={member.role === 'editor' ? 'success' : 'neutral'}
+                        />
                       )}
 
-                      {!isYou && member.role !== 'owner' && (
+                      {currentUserRole === 'owner' && !isYou && member.role !== 'owner' && (
                         <TouchableOpacity
                           onPress={() => handleConfirmRemoveMember(member.id, member.name)}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -510,14 +618,21 @@ export const WorkspacesScreen: React.FC = () => {
       {/* Modal Criar Espaço */}
       <ModalContainer
         visible={createModalVisible}
-        onClose={() => setCreateModalVisible(false)}
+        onClose={() => {
+          setCreateModalVisible(false);
+          setNewWsNameError('');
+        }}
         title="Novo Espaço Financeiro"
       >
         <Input
           label="Nome do Espaço"
           placeholder="Ex: Finanças Casal, Empresa MEI"
           value={newWsName}
-          onChangeText={setNewWsName}
+          onChangeText={(val) => {
+            setNewWsName(val);
+            if (newWsNameError) setNewWsNameError('');
+          }}
+          error={newWsNameError}
         />
 
         <Input
@@ -586,14 +701,22 @@ export const WorkspacesScreen: React.FC = () => {
       {/* Modal Convidar Membro */}
       <ModalContainer
         visible={memberModalVisible}
-        onClose={() => setMemberModalVisible(false)}
+        onClose={() => {
+          setMemberModalVisible(false);
+          setMemberNameError('');
+          setMemberEmailError('');
+        }}
         title="Liberar Acesso para Outra Pessoa"
       >
         <Input
           label="Nome do Convidado"
           placeholder="Ex: Maria Clara, João Pedro"
           value={memberName}
-          onChangeText={setMemberName}
+          onChangeText={(val) => {
+            setMemberName(val);
+            if (memberNameError) setMemberNameError('');
+          }}
+          error={memberNameError}
         />
 
         <Input
@@ -601,7 +724,11 @@ export const WorkspacesScreen: React.FC = () => {
           placeholder="exemplo@email.com"
           keyboardType="email-address"
           value={memberEmail}
-          onChangeText={setMemberEmail}
+          onChangeText={(val) => {
+            setMemberEmail(val);
+            if (memberEmailError) setMemberEmailError('');
+          }}
+          error={memberEmailError}
         />
 
         <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
@@ -663,7 +790,10 @@ export const WorkspacesScreen: React.FC = () => {
       {/* Modal Entrar com Código */}
       <ModalContainer
         visible={joinModalVisible}
-        onClose={() => setJoinModalVisible(false)}
+        onClose={() => {
+          setJoinModalVisible(false);
+          setJoinCodeError('');
+        }}
         title="Entrar em um Espaço"
       >
         <Input
@@ -671,7 +801,11 @@ export const WorkspacesScreen: React.FC = () => {
           placeholder="Ex: FIN-7842"
           autoCapitalize="characters"
           value={joinCode}
-          onChangeText={setJoinCode}
+          onChangeText={(val) => {
+            setJoinCode(val);
+            if (joinCodeError) setJoinCodeError('');
+          }}
+          error={joinCodeError}
         />
         <Button
           title="Vincular Espaço"
@@ -683,22 +817,31 @@ export const WorkspacesScreen: React.FC = () => {
       {/* Modal Renomear Espaço */}
       <ModalContainer
         visible={renameModalVisible}
-        onClose={() => setRenameModalVisible(false)}
+        onClose={() => {
+          setRenameModalVisible(false);
+          setRenameError('');
+        }}
         title="Renomear Espaço"
       >
         <Input
           label="Novo Nome do Espaço"
           placeholder="Ex: Finanças Casal"
           value={renameValue}
-          onChangeText={setRenameValue}
+          onChangeText={(val) => {
+            setRenameValue(val);
+            if (renameError) setRenameError('');
+          }}
+          error={renameError}
         />
         <Button
           title="Salvar Novo Nome"
           onPress={async () => {
-            if (renameValue.trim()) {
-              await renameWorkspace(activeWorkspace.id, renameValue.trim());
-              setRenameModalVisible(false);
+            if (!renameValue.trim()) {
+              setRenameError('Informe o novo nome');
+              return;
             }
+            await renameWorkspace(activeWorkspace.id, renameValue.trim());
+            setRenameModalVisible(false);
           }}
           style={{ marginTop: 8 }}
         />

@@ -31,6 +31,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [loading, setLoading] = useState(false);
   const [errorMessage, setErrorMessage] = useState('');
+  const [nameError, setNameError] = useState('');
+  const [emailError, setEmailError] = useState('');
+  const [passwordError, setPasswordError] = useState('');
   const [showResendBtn, setShowResendBtn] = useState(false);
 
   const handleResendEmail = async () => {
@@ -53,20 +56,36 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
   };
 
   const handleAction = async () => {
-    if (!email.trim() || !password.trim()) {
-      setErrorMessage('Preencha seu e-mail e sua senha.');
-      return;
-    }
+    let hasErr = false;
 
     if (mode === 'signup' && !name.trim()) {
-      setErrorMessage('Informe seu nome para criar a conta.');
-      return;
+      setNameError('Informe seu nome completo');
+      hasErr = true;
+    } else {
+      setNameError('');
     }
 
-    if (password.length < 6) {
-      setErrorMessage('A senha deve ter no mínimo 6 caracteres.');
-      return;
+    if (!email.trim()) {
+      setEmailError('Informe seu e-mail');
+      hasErr = true;
+    } else if (!email.includes('@') || !email.includes('.')) {
+      setEmailError('Informe um e-mail válido');
+      hasErr = true;
+    } else {
+      setEmailError('');
     }
+
+    if (!password.trim()) {
+      setPasswordError('Informe sua senha');
+      hasErr = true;
+    } else if (password.length < 6) {
+      setPasswordError('A senha deve ter no mínimo 6 caracteres');
+      hasErr = true;
+    } else {
+      setPasswordError('');
+    }
+
+    if (hasErr) return;
 
     setErrorMessage('');
     setLoading(true);
@@ -134,10 +153,14 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
 
   const handleResetPassword = async () => {
     if (!email.trim()) {
-      setErrorMessage('Informe seu e-mail para receber o link de redefinição.');
+      setEmailError('Informe seu e-mail');
+      return;
+    } else if (!email.includes('@') || !email.includes('.')) {
+      setEmailError('Informe um e-mail válido');
       return;
     }
 
+    setEmailError('');
     setErrorMessage('');
     setLoading(true);
 
@@ -165,8 +188,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
 
   return (
     <KeyboardAvoidingView
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       style={[styles.container, { backgroundColor: theme.background }]}
+      keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
     >
       <ScrollView
         contentContainerStyle={styles.scrollContent}
@@ -230,7 +254,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(val) => {
+                  setEmail(val);
+                  if (emailError) setEmailError('');
+                }}
+                error={emailError}
               />
 
               {errorMessage ? (
@@ -306,7 +334,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
                   label="Seu Nome Completo"
                   placeholder="Ex: Seu Nome"
                   value={name}
-                  onChangeText={setName}
+                  onChangeText={(val) => {
+                    setName(val);
+                    if (nameError) setNameError('');
+                  }}
+                  error={nameError}
                 />
               )}
 
@@ -316,7 +348,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
                 autoCapitalize="none"
                 keyboardType="email-address"
                 value={email}
-                onChangeText={setEmail}
+                onChangeText={(val) => {
+                  setEmail(val);
+                  if (emailError) setEmailError('');
+                }}
+                error={emailError}
               />
 
               <View style={styles.passwordWrap}>
@@ -325,8 +361,12 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
                   placeholder="Mínimo 6 caracteres"
                   secureTextEntry={!showPassword}
                   value={password}
-                  onChangeText={setPassword}
+                  onChangeText={(val) => {
+                    setPassword(val);
+                    if (passwordError) setPasswordError('');
+                  }}
                   containerStyle={{ marginBottom: 0, flex: 1 }}
+                  error={passwordError}
                 />
                 <TouchableOpacity
                   style={styles.eyeBtn}
@@ -347,6 +387,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
                   onPress={() => {
                     setMode('forgot');
                     setErrorMessage('');
+                    setEmailError('');
+                    setPasswordError('');
+                    setNameError('');
                   }}
                   activeOpacity={0.7}
                 >
@@ -412,13 +455,14 @@ const styles = StyleSheet.create({
   scrollContent: {
     flexGrow: 1,
     justifyContent: 'center',
-    padding: 20,
-    paddingVertical: 40,
+    paddingHorizontal: 20,
+    paddingTop: 20,
+    paddingBottom: 40,
   },
   topBar: {
     flexDirection: 'row',
     justifyContent: 'flex-end',
-    marginBottom: 10,
+    marginBottom: 6,
   },
   closeModalBtn: {
     width: 36,
@@ -429,18 +473,18 @@ const styles = StyleSheet.create({
   },
   header: {
     alignItems: 'center',
-    marginBottom: 24,
+    marginBottom: 16,
   },
   iconCircle: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
+    width: 68,
+    height: 68,
+    borderRadius: 34,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 12,
+    marginBottom: 10,
   },
   appName: {
-    fontSize: 26,
+    fontSize: 24,
     fontWeight: '800',
     marginBottom: 4,
   },

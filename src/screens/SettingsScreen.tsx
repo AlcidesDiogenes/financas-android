@@ -44,7 +44,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const { user, signOut, deleteAccount, updatePassword, updateProfile } = useAuth();
   const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
-  const { transactions, selectedMonth, selectedYear, reloadAll } = useFinance();
+  const { transactions, selectedMonth, selectedYear, reloadAll, balanceMode, setBalanceMode } = useFinance();
 
   const [isSyncing, setIsSyncing] = useState(false);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
@@ -67,7 +67,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
-  const [passwordError, setPasswordError] = useState('');
+  const [currentPasswordError, setCurrentPasswordError] = useState('');
+  const [newPasswordError, setNewPasswordError] = useState('');
+  const [confirmPasswordError, setConfirmPasswordError] = useState('');
+  const [passwordGeneralError, setPasswordGeneralError] = useState('');
 
   // Modal para Editar Nome do Perfil
   const [showProfileModal, setShowProfileModal] = useState(false);
@@ -85,34 +88,49 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [selectedNewOwnerEmail, setSelectedNewOwnerEmail] = useState('');
 
   const handleUpdatePassword = async () => {
+    let hasErr = false;
     if (!currentPassword) {
-      setPasswordError('Por favor, informe a sua senha atual para continuar.');
-      return;
+      setCurrentPasswordError('Informe sua senha atual');
+      hasErr = true;
+    } else {
+      setCurrentPasswordError('');
     }
+
     if (!newPassword || newPassword.length < 6) {
-      setPasswordError('A nova senha deve ter no mínimo 6 caracteres.');
-      return;
+      setNewPasswordError('Mínimo de 6 caracteres');
+      hasErr = true;
+    } else {
+      setNewPasswordError('');
     }
+
     if (newPassword !== confirmPassword) {
-      setPasswordError('As novas senhas não coincidem.');
-      return;
+      setConfirmPasswordError('As senhas não coincidem');
+      hasErr = true;
+    } else {
+      setConfirmPasswordError('');
     }
+
+    if (hasErr) return;
 
     try {
       setPasswordLoading(true);
-      setPasswordError('');
+      setPasswordGeneralError('');
       const res = await updatePassword(currentPassword, newPassword);
       if (res.success) {
         setShowPasswordModal(false);
         setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
+        setCurrentPasswordError('');
+        setNewPasswordError('');
+        setConfirmPasswordError('');
+        setPasswordGeneralError('');
         Alert.alert('Sucesso 🎉', 'Sua senha foi alterada com sucesso!');
       } else {
-        setPasswordError(res.error || 'Não foi possível alterar a senha.');
+        setPasswordGeneralError(res.error || 'Não foi possível alterar a senha.');
       }
     } catch {
-      setPasswordError('Erro ao atualizar senha.');
+      setPasswordGeneralError('Erro ao atualizar senha.');
     } finally {
       setPasswordLoading(false);
     }
@@ -120,7 +138,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
 
   const handleUpdateProfile = async () => {
     if (!editedName.trim()) {
-      setProfileError('Por favor, informe seu nome.');
+      setProfileError('Informe seu nome ou apelido');
       return;
     }
 
@@ -130,6 +148,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       const res = await updateProfile(editedName.trim());
       if (res.success) {
         setShowProfileModal(false);
+        setProfileError('');
         Alert.alert('Sucesso ✨', 'Seu nome de usuário foi atualizado com sucesso!');
       } else {
         setProfileError(res.error || 'Não foi possível atualizar o nome.');
@@ -261,21 +280,21 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
     setUpdateStep('downloading');
     setUpdateStage('download');
     setUpdateDownloadProgress(10);
-    setUpdateStatusText('Etapa 1/2: Baixando novos arquivos e telas...');
+    setUpdateStatusText('Baixando novos arquivos e telas...');
 
-    // Progresso do download (10% a 92%)
+    // Progresso do download (10% a 80%)
     let currentProgress = 10;
     const downloadInterval = setInterval(() => {
       currentProgress += Math.floor(Math.random() * 8) + 6;
-      if (currentProgress > 92) {
-        currentProgress = 92;
+      if (currentProgress > 80) {
+        currentProgress = 80;
         clearInterval(downloadInterval);
       }
       setUpdateDownloadProgress(currentProgress);
       if (currentProgress < 50) {
-        setUpdateStatusText('Etapa 1/2: Baixando novos arquivos e telas...');
+        setUpdateStatusText('Baixando novos arquivos e telas...');
       } else {
-        setUpdateStatusText('Etapa 1/2: Concluindo download do pacote...');
+        setUpdateStatusText('Concluindo download dos arquivos...');
       }
     }, 350);
 
@@ -286,21 +305,21 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       await fetchPromise;
       clearInterval(downloadInterval);
 
-      // Etapa 2: Instalação, descompactação e compilação do bundle
+      // Instalação, descompactação e compilação do bundle (82% a 100%)
       setUpdateStep('installing');
       setUpdateStage('install');
-      setUpdateDownloadProgress(94);
-      setUpdateStatusText('Etapa 2/2: Instalando e verificando integridade do código...');
+      setUpdateDownloadProgress(82);
+      setUpdateStatusText('Instalando e verificando integridade do código...');
 
-      let installProgress = 94;
+      let installProgress = 82;
       const installInterval = setInterval(() => {
-        installProgress += 2;
+        installProgress += 3;
         if (installProgress >= 99) {
           installProgress = 99;
           clearInterval(installInterval);
         }
         setUpdateDownloadProgress(installProgress);
-        setUpdateStatusText('Etapa 2/2: Finalizando instalação dos módulos...');
+        setUpdateStatusText('Finalizando instalação dos módulos...');
       }, 250);
 
       // Breve pausa para garantir que os arquivos em disco foram validados
@@ -458,9 +477,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                   <Text style={[styles.profileName, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
                     {user ? user.name : 'Modo Offline'}
                   </Text>
-                  {user && (
-                    <Ionicons name="pencil-sharp" size={13} color={theme.primary} />
-                  )}
                   <Badge
                     label={user ? 'Nuvem Ativa' : 'Offline'}
                     variant={user ? 'success' : 'neutral'}
@@ -735,6 +751,71 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             </View>
           </View>
 
+          <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
+
+          {/* Modo de Cálculo do Saldo Principal */}
+          <View style={styles.cellColumn}>
+            <View style={styles.cell}>
+              <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}20` }]}>
+                <Ionicons name="wallet-outline" size={20} color={theme.primary} />
+              </View>
+              <View style={styles.cellTextWrap}>
+                <Text style={[styles.cellTitle, { color: theme.text }]}>
+                  Cálculo do Saldo Principal
+                </Text>
+                <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                  {balanceMode === 'realized'
+                    ? 'Saldo Real: Atualiza somente quando você marca como pago/recebido'
+                    : 'Saldo Previsto: Já desconta todas as contas fixas do mês (checklist de quitação)'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.badgeOptionRow}>
+              {(
+                [
+                  { id: 'realized', label: 'Real (Caixa)', icon: 'cash-outline' },
+                  { id: 'projected', label: 'Previsto Total', icon: 'calculator-outline' },
+                ] as const
+              ).map((opt) => {
+                const isSelected = balanceMode === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    onPress={() => setBalanceMode(opt.id as any)}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.badgeOptionBtn,
+                      {
+                        backgroundColor: isSelected ? `${theme.primary}15` : theme.surfaceVariant,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.badgeOptionContent}>
+                      <Ionicons
+                        name={opt.icon as any}
+                        size={15}
+                        color={isSelected ? theme.primary : theme.textMuted}
+                      />
+                      <Text
+                        style={[
+                          styles.badgeOptionLabel,
+                          {
+                            color: isSelected ? theme.primary : theme.text,
+                            fontWeight: isSelected ? '700' : '500',
+                          },
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
           {/* Alterar Senha (apenas quando logado com conta) */}
           {user ? (
             <>
@@ -743,9 +824,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 style={styles.cell}
                 activeOpacity={0.7}
                 onPress={() => {
+                  setCurrentPassword('');
                   setNewPassword('');
                   setConfirmPassword('');
-                  setPasswordError('');
+                  setCurrentPasswordError('');
+                  setNewPasswordError('');
+                  setConfirmPasswordError('');
+                  setPasswordGeneralError('');
                   setShowPasswordModal(true);
                 }}
               >
@@ -948,7 +1033,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 placeholder="Digite sua senha atual"
                 secureTextEntry
                 value={currentPassword}
-                onChangeText={setCurrentPassword}
+                onChangeText={(val) => {
+                  setCurrentPassword(val);
+                  if (currentPasswordError) setCurrentPasswordError('');
+                  if (passwordGeneralError) setPasswordGeneralError('');
+                }}
+                error={currentPasswordError}
               />
 
               <Input
@@ -956,7 +1046,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 placeholder="Mínimo 6 caracteres"
                 secureTextEntry
                 value={newPassword}
-                onChangeText={setNewPassword}
+                onChangeText={(val) => {
+                  setNewPassword(val);
+                  if (newPasswordError) setNewPasswordError('');
+                  if (passwordGeneralError) setPasswordGeneralError('');
+                }}
+                error={newPasswordError}
               />
 
               <Input
@@ -964,14 +1059,19 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 placeholder="Repita a nova senha"
                 secureTextEntry
                 value={confirmPassword}
-                onChangeText={setConfirmPassword}
+                onChangeText={(val) => {
+                  setConfirmPassword(val);
+                  if (confirmPasswordError) setConfirmPasswordError('');
+                  if (passwordGeneralError) setPasswordGeneralError('');
+                }}
+                error={confirmPasswordError}
               />
 
-              {passwordError ? (
+              {passwordGeneralError ? (
                 <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
                   <Ionicons name="alert-circle" size={16} color={theme.danger} />
                   <Text style={[styles.errorText, { color: theme.danger }]}>
-                    {passwordError}
+                    {passwordGeneralError}
                   </Text>
                 </View>
               ) : null}
@@ -985,7 +1085,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                     setCurrentPassword('');
                     setNewPassword('');
                     setConfirmPassword('');
-                    setPasswordError('');
+                    setCurrentPasswordError('');
+                    setNewPasswordError('');
+                    setConfirmPasswordError('');
+                    setPasswordGeneralError('');
                   }}
                   style={{ flex: 1, marginRight: 8 }}
                 />
@@ -1051,18 +1154,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 label="Nome de Usuário"
                 placeholder="Digite seu nome completo ou apelido"
                 value={editedName}
-                onChangeText={setEditedName}
+                onChangeText={(val) => {
+                  setEditedName(val);
+                  if (profileError) setProfileError('');
+                }}
                 autoCapitalize="words"
+                error={profileError}
               />
-
-              {profileError ? (
-                <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
-                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
-                  <Text style={[styles.errorText, { color: theme.danger }]}>
-                    {profileError}
-                  </Text>
-                </View>
-              ) : null}
 
               <View style={styles.passwordModalActions}>
                 <Button
@@ -1294,34 +1392,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 : 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'}
             </Text>
 
-            {/* BARRA DE PROGRESSO VISUAL & ETAPAS */}
+            {/* BARRA DE PROGRESSO VISUAL */}
             {(updateStep === 'downloading' || updateStep === 'installing') && (
               <View style={styles.progressContainer}>
-                {/* Indicador de Etapas */}
-                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons
-                      name={updateStep === 'installing' ? 'checkmark-circle' : 'radio-button-on'}
-                      size={14}
-                      color={updateStep === 'installing' ? '#10B981' : theme.primary}
-                    />
-                    <Text style={{ fontSize: 11, fontWeight: '700', marginLeft: 4, color: updateStep === 'installing' ? '#10B981' : theme.primary }}>
-                      1. Download
-                    </Text>
-                  </View>
-
-                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                    <Ionicons
-                      name={updateStep === 'installing' ? 'radio-button-on' : 'ellipse-outline'}
-                      size={14}
-                      color={updateStep === 'installing' ? '#673AB7' : theme.textMuted}
-                    />
-                    <Text style={{ fontSize: 11, fontWeight: updateStep === 'installing' ? '700' : '500', marginLeft: 4, color: updateStep === 'installing' ? '#673AB7' : theme.textMuted }}>
-                      2. Instalação
-                    </Text>
-                  </View>
-                </View>
-
                 <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#333' : '#E0E0E0' }]}>
                   <View
                     style={[

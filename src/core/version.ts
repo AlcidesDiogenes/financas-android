@@ -13,8 +13,8 @@ export interface ReleaseNote {
 }
 
 export const APP_VERSION_CONFIG = {
-  version: '1.3.6',
-  buildNumber: 8,
+  version: '1.3.7',
+  buildNumber: 9,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -25,6 +25,40 @@ export const getAppVersionString = (): string => {
 };
 
 export const RELEASE_HISTORY: ReleaseNote[] = [
+  {
+    version: '1.3.7',
+    buildNumber: 9,
+    date: '06/10/2026',
+    title: 'Saldo Previsto, Gestão de Espaços e Melhorias Visuais ✨',
+    highlight: 'Modo de saldo previsto, regras de membros nos espaços e novas validações.',
+    changes: [
+      {
+        icon: 'calculator-outline',
+        title: 'Saldo Real vs Previsto Total',
+        description: 'Alterne rapidamente no card principal entre Saldo Real de Caixa ou Saldo Previsto Planejado.',
+      },
+      {
+        icon: 'people-outline',
+        title: 'Gestão Segura de Espaços',
+        description: 'Membros convidados podem sair do espaço a qualquer momento, e apenas o proprietário pode excluir ou transferir a titularidade.',
+      },
+      {
+        icon: 'alert-circle-outline',
+        title: 'Validação Vermelha por Campo',
+        description: 'Avisos visuais imediatos embaixo de cada campo quando faltar preenchimento ou valor inválido.',
+      },
+      {
+        icon: 'cloud-download-outline',
+        title: 'Atualizações Mais Rápidas e Limpas',
+        description: 'Feedback de download refinado com progresso contínuo e sem travas.',
+      },
+      {
+        icon: 'key-outline',
+        title: 'Teclado e Layout Otimizados',
+        description: 'Campos de login e modais sobem perfeitamente quando o teclado do celular abre.',
+      },
+    ],
+  },
   {
     version: '1.3.6',
     buildNumber: 8,

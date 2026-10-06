@@ -80,7 +80,10 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
     `${String(currentPeriod.month).padStart(2, '0')}/${currentPeriod.year}`
   );
   const [endMonthYear, setEndMonthYear] = useState<string>('');
-  const [error, setError] = useState('');
+  const [titleError, setTitleError] = useState('');
+  const [amountError, setAmountError] = useState('');
+  const [dueDayError, setDueDayError] = useState('');
+  const [vigenciaError, setVigenciaError] = useState('');
 
   useEffect(() => {
     if (visible) {
@@ -127,56 +130,72 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         setStartMonthYear(`${String(currentPeriod.month).padStart(2, '0')}/${currentPeriod.year}`);
         setEndMonthYear('');
       }
-      setError('');
+      setTitleError('');
+      setAmountError('');
+      setDueDayError('');
+      setVigenciaError('');
     }
   }, [visible, initialData, currentPeriod]);
 
   const handleSave = () => {
+    let hasError = false;
+
     if (!title.trim()) {
-      setError('Informe o nome da conta ou assinatura');
-      return;
+      setTitleError(type === 'income' ? 'Informe a descrição da renda' : 'Informe o nome da conta ou débito');
+      hasError = true;
+    } else {
+      setTitleError('');
     }
 
     const cleanAmount = parseFloat(amountStr.replace(',', '.'));
     if (isNaN(cleanAmount) || cleanAmount <= 0) {
-      setError('Informe um valor válido maior que zero');
-      return;
+      setAmountError('Informe um valor válido maior que zero');
+      hasError = true;
+    } else {
+      setAmountError('');
     }
 
     const day = parseInt(dueDayStr, 10);
     if (isNaN(day) || day < 1 || day > 31) {
-      setError('O dia de vencimento deve ser entre 1 e 31');
-      return;
+      setDueDayError('Dia entre 1 e 31');
+      hasError = true;
+    } else {
+      setDueDayError('');
     }
 
     let startDateFormatted: string | undefined = undefined;
+    let vigErr = '';
     if (startMonthYear.trim()) {
       const parsedStart = parseMonthYear(startMonthYear);
       if (!parsedStart) {
-        setError('Mês/Ano inicial de vigência inválido. Use MM/AAAA');
-        return;
+        vigErr = 'Mês/Ano inicial inválido. Use MM/AAAA';
+        hasError = true;
+      } else {
+        startDateFormatted = `${parsedStart.year}-${String(parsedStart.month).padStart(2, '0')}`;
       }
-      startDateFormatted = `${parsedStart.year}-${String(parsedStart.month).padStart(2, '0')}`;
     }
 
     let endDateFormatted: string | undefined = undefined;
     if (endMonthYear.trim()) {
       const parsedEnd = parseMonthYear(endMonthYear);
       if (!parsedEnd) {
-        setError('Mês/Ano final de vigência inválido. Use MM/AAAA');
-        return;
-      }
-      if (startMonthYear.trim()) {
-        const parsedStart = parseMonthYear(startMonthYear)!;
-        if (parsedStart.year * 12 + parsedStart.month > parsedEnd.year * 12 + parsedEnd.month) {
-          setError('A vigência final deve ser igual ou posterior ao início.');
-          return;
+        vigErr = 'Mês/Ano final inválido. Use MM/AAAA';
+        hasError = true;
+      } else {
+        if (startMonthYear.trim()) {
+          const parsedStart = parseMonthYear(startMonthYear)!;
+          if (parsedStart.year * 12 + parsedStart.month > parsedEnd.year * 12 + parsedEnd.month) {
+            vigErr = 'Término deve ser igual ou após o início';
+            hasError = true;
+          }
         }
+        endDateFormatted = `${parsedEnd.year}-${String(parsedEnd.month).padStart(2, '0')}`;
       }
-      endDateFormatted = `${parsedEnd.year}-${String(parsedEnd.month).padStart(2, '0')}`;
     }
 
-    setError('');
+    setVigenciaError(vigErr);
+    if (hasError) return;
+
     onSubmit({
       title: title.trim(),
       amount: cleanAmount,
@@ -268,7 +287,11 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         label={type === 'income' ? 'Descrição da Renda Recorrente' : 'Nome do Débito / Assinatura'}
         placeholder={type === 'income' ? 'Ex: Salário, Aluguel Recebido, Pensão' : 'Ex: Aluguel, Netflix, Internet, Cartão'}
         value={title}
-        onChangeText={setTitle}
+        onChangeText={(val) => {
+          setTitle(val);
+          if (titleError) setTitleError('');
+        }}
+        error={titleError}
       />
 
       <View style={styles.row}>
@@ -278,7 +301,11 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
             placeholder="0.00"
             keyboardType="decimal-pad"
             value={amountStr}
-            onChangeText={setAmountStr}
+            onChangeText={(val) => {
+              setAmountStr(val);
+              if (amountError) setAmountError('');
+            }}
+            error={amountError}
           />
         </View>
         <View style={{ flex: 1 }}>
@@ -288,7 +315,11 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
             keyboardType="number-pad"
             maxLength={2}
             value={dueDayStr}
-            onChangeText={setDueDayStr}
+            onChangeText={(val) => {
+              setDueDayStr(val);
+              if (dueDayError) setDueDayError('');
+            }}
+            error={dueDayError}
           />
         </View>
       </View>
@@ -306,7 +337,10 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
               keyboardType="numeric"
               maxLength={7}
               value={startMonthYear}
-              onChangeText={(val) => setStartMonthYear(applyMonthYearMask(val))}
+              onChangeText={(val) => {
+                setStartMonthYear(applyMonthYearMask(val));
+                if (vigenciaError) setVigenciaError('');
+              }}
             />
           </View>
           <View style={{ flex: 1 }}>
@@ -316,10 +350,18 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
               keyboardType="numeric"
               maxLength={7}
               value={endMonthYear}
-              onChangeText={(val) => setEndMonthYear(applyMonthYearMask(val))}
+              onChangeText={(val) => {
+                setEndMonthYear(applyMonthYearMask(val));
+                if (vigenciaError) setVigenciaError('');
+              }}
             />
           </View>
         </View>
+        {vigenciaError ? (
+          <Text style={{ fontSize: 12, color: theme.danger, marginTop: -8, marginBottom: 6, fontWeight: '500' }}>
+            {vigenciaError}
+          </Text>
+        ) : null}
         <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, marginLeft: 2 }}>
           💡 Deixe o término em branco se a conta ou renda for contínua/sem prazo final.
         </Text>
@@ -365,10 +407,6 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
           </ScrollView>
         </View>
       )}
-
-      {error ? (
-        <Text style={[styles.error, { color: theme.danger }]}>{error}</Text>
-      ) : null}
 
       <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
         Categoria

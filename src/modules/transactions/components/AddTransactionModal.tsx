@@ -70,7 +70,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
   const [category, setCategory] = useState<TransactionCategory>('Alimentação');
   const [assignedTo, setAssignedTo] = useState<string>('');
   const [notes, setNotes] = useState('');
-  const [error, setError] = useState('');
+  const [titleError, setTitleError] = useState('');
+  const [amountError, setAmountError] = useState('');
 
   useEffect(() => {
     if (visible) {
@@ -86,27 +87,35 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         setType('expense');
         setCategory('Alimentação');
       }
-      setError('');
+      setTitleError('');
+      setAmountError('');
     }
   }, [visible, initialMode]);
 
   const handleSave = () => {
+    let hasError = false;
+
     if (!title.trim()) {
-      setError(
+      setTitleError(
         entryMode === 'saving'
-          ? 'Informe onde guardou o dinheiro (ex: Poupança, Banco)'
+          ? 'Informe onde guardou o dinheiro'
           : 'Informe a descrição do lançamento'
       );
-      return;
+      hasError = true;
+    } else {
+      setTitleError('');
     }
 
     const cleanAmount = parseFloat(amountStr.replace(',', '.'));
     if (isNaN(cleanAmount) || cleanAmount <= 0) {
-      setError('Informe um valor válido maior que zero');
-      return;
+      setAmountError('Informe um valor válido maior que zero');
+      hasError = true;
+    } else {
+      setAmountError('');
     }
 
-    setError('');
+    if (hasError) return;
+
     onSubmit({
       title: title.trim(),
       amount: cleanAmount,
@@ -242,7 +251,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             : 'Ex: Supermercado, Farmácia, Gasolina, Uber'
         }
         value={title}
-        onChangeText={setTitle}
+        onChangeText={(val) => {
+          setTitle(val);
+          if (titleError) setTitleError('');
+        }}
+        error={titleError}
       />
 
       <Input
@@ -250,7 +263,11 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
         placeholder="0.00"
         keyboardType="decimal-pad"
         value={amountStr}
-        onChangeText={setAmountStr}
+        onChangeText={(val) => {
+          setAmountStr(val);
+          if (amountError) setAmountError('');
+        }}
+        error={amountError}
       />
 
       {/* Responsável - Apenas se o espaço for Compartilhado */}
@@ -293,10 +310,6 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
           </ScrollView>
         </View>
       )}
-
-      {error ? (
-        <Text style={[styles.error, { color: theme.danger }]}>{error}</Text>
-      ) : null}
 
       <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
         Categoria

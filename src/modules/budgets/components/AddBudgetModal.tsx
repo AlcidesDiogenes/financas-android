@@ -71,7 +71,8 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
   const [limitStr, setLimitStr] = useState('');
   const [startMonthYear, setStartMonthYear] = useState('');
   const [endMonthYear, setEndMonthYear] = useState('');
-  const [error, setError] = useState('');
+  const [limitError, setLimitError] = useState('');
+  const [vigenciaError, setVigenciaError] = useState('');
 
   React.useEffect(() => {
     if (initialData) {
@@ -108,22 +109,28 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
       setStartMonthYear(`${String(now.getMonth() + 1).padStart(2, '0')}/${now.getFullYear()}`);
       setEndMonthYear('');
     }
-    setError('');
+    setLimitError('');
+    setVigenciaError('');
   }, [initialData, visible]);
 
   const handleSave = () => {
+    let hasError = false;
+
     const cleanAmount = parseFloat(limitStr.replace(',', '.'));
     if (isNaN(cleanAmount) || cleanAmount <= 0) {
-      setError('Informe um valor de teto válido');
-      return;
+      setLimitError('Informe um valor de teto válido maior que zero');
+      hasError = true;
+    } else {
+      setLimitError('');
     }
 
     let startDateFormatted: string | undefined;
+    let vigErr = '';
     if (startMonthYear.trim()) {
       startDateFormatted = parseMonthYearToISO(startMonthYear);
       if (!startDateFormatted) {
-        setError('Início da vigência inválido. Use o formato MM/AAAA (ex: 01/2026)');
-        return;
+        vigErr = 'Início inválido. Use o formato MM/AAAA (ex: 01/2026)';
+        hasError = true;
       }
     }
 
@@ -131,8 +138,8 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
     if (endMonthYear.trim()) {
       endDateFormatted = parseMonthYearToISO(endMonthYear);
       if (!endDateFormatted) {
-        setError('Término da vigência inválido. Use o formato MM/AAAA (ex: 12/2026)');
-        return;
+        vigErr = 'Término inválido. Use o formato MM/AAAA (ex: 12/2026)';
+        hasError = true;
       }
     }
 
@@ -142,12 +149,13 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
       const startComp = startParts[0] * 12 + startParts[1];
       const endComp = endParts[0] * 12 + endParts[1];
       if (startComp > endComp) {
-        setError('O início da vigência não pode ser posterior ao término');
-        return;
+        vigErr = 'O início da vigência não pode ser posterior ao término';
+        hasError = true;
       }
     }
 
-    setError('');
+    setVigenciaError(vigErr);
+    if (hasError) return;
     onSubmit(
       category,
       cleanAmount,
@@ -213,7 +221,11 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
         placeholder="Ex: 1500.00"
         keyboardType="decimal-pad"
         value={limitStr}
-        onChangeText={setLimitStr}
+        onChangeText={(val) => {
+          setLimitStr(val);
+          if (limitError) setLimitError('');
+        }}
+        error={limitError}
       />
 
       {/* Vigência (Início e Fim) */}
@@ -229,7 +241,10 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
               keyboardType="numeric"
               maxLength={7}
               value={startMonthYear}
-              onChangeText={(val) => setStartMonthYear(applyMonthYearMask(val))}
+              onChangeText={(val) => {
+                setStartMonthYear(applyMonthYearMask(val));
+                if (vigenciaError) setVigenciaError('');
+              }}
             />
           </View>
           <View style={{ flex: 1 }}>
@@ -239,18 +254,22 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
               keyboardType="numeric"
               maxLength={7}
               value={endMonthYear}
-              onChangeText={(val) => setEndMonthYear(applyMonthYearMask(val))}
+              onChangeText={(val) => {
+                setEndMonthYear(applyMonthYearMask(val));
+                if (vigenciaError) setVigenciaError('');
+              }}
             />
           </View>
         </View>
+        {vigenciaError ? (
+          <Text style={{ fontSize: 12, color: theme.danger, marginTop: -8, marginBottom: 6, fontWeight: '500' }}>
+            {vigenciaError}
+          </Text>
+        ) : null}
         <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, marginLeft: 2 }}>
           💡 Deixe o término em branco se este teto for contínuo para todos os próximos meses.
         </Text>
       </View>
-
-      {error ? (
-        <Text style={[styles.error, { color: theme.danger }]}>{error}</Text>
-      ) : null}
 
       <Button
         title={initialData ? 'Salvar Alterações' : 'Salvar Orçamento'}

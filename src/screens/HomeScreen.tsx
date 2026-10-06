@@ -45,6 +45,9 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     monthlySummary,
     projectedExpense,
     projectedBalance,
+    balanceMode,
+    setBalanceMode,
+    toggleBalanceMode,
     transactions,
     recurrings,
     budgetProgressList,
@@ -64,9 +67,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     setAddModalVisible(true);
   };
 
-  const pendingRecurrings = recurrings
-    .filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear))
-    .filter((r) => !r.isPaidCurrentMonth);
+  const activeRecurrings = useMemo(
+    () => recurrings.filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear)),
+    [recurrings, selectedMonth, selectedYear]
+  );
+  const pendingRecurrings = activeRecurrings.filter((r) => !r.isPaidCurrentMonth);
+  const paidRecurringsCount = activeRecurrings.filter((r) => r.isPaidCurrentMonth).length;
+  const totalRecurringsCount = activeRecurrings.length;
   const recentTransactions = transactions.slice(0, 4);
 
   const categorySpendings = useMemo(() => {
@@ -153,17 +160,69 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 
         {/* Hero Card: Balance & Summary */}
         <Card variant="elevated" style={styles.heroCard}>
-          <Text style={[styles.balanceLabel, { color: theme.textMuted }]}>
-            Saldo Líquido Atual
-          </Text>
-          <Text
-            style={[
-              styles.balanceValue,
-              { color: monthlySummary.balance >= 0 ? theme.text : theme.danger },
-            ]}
-          >
-            {formatPrivateCurrency(monthlySummary.balance, formatCurrency(monthlySummary.balance))}
-          </Text>
+          {/* Header do Card com Seletor Rápido de Modo de Saldo */}
+          <View style={styles.heroCardHeaderRow}>
+            <Text style={[styles.balanceLabel, { color: theme.textMuted }]}>
+              {balanceMode === 'realized' ? 'Saldo Realizado (Caixa)' : 'Saldo Previsto do Mês'}
+            </Text>
+
+            <View style={[styles.balanceModeToggle, { backgroundColor: theme.surfaceVariant }]}>
+              <TouchableOpacity
+                onPress={() => setBalanceMode('realized')}
+                activeOpacity={0.7}
+                style={[
+                  styles.modeTabBtn,
+                  balanceMode === 'realized' && { backgroundColor: theme.primary },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modeTabText,
+                    { color: balanceMode === 'realized' ? '#FFF' : theme.textMuted },
+                  ]}
+                >
+                  Real
+                </Text>
+              </TouchableOpacity>
+
+              <TouchableOpacity
+                onPress={() => setBalanceMode('projected')}
+                activeOpacity={0.7}
+                style={[
+                  styles.modeTabBtn,
+                  balanceMode === 'projected' && { backgroundColor: theme.primary },
+                ]}
+              >
+                <Text
+                  style={[
+                    styles.modeTabText,
+                    { color: balanceMode === 'projected' ? '#FFF' : theme.textMuted },
+                  ]}
+                >
+                  Previsto
+                </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+
+          {/* Valor Principal do Saldo Dinâmico */}
+          {(() => {
+            const currentDisplayBalance =
+              balanceMode === 'realized' ? monthlySummary.balance : projectedBalance;
+            return (
+              <Text
+                style={[
+                  styles.balanceValue,
+                  { color: currentDisplayBalance >= 0 ? theme.text : theme.danger },
+                ]}
+              >
+                {formatPrivateCurrency(
+                  currentDisplayBalance,
+                  formatCurrency(currentDisplayBalance)
+                )}
+              </Text>
+            );
+          })()}
 
           {/* Income, Expense & Savings Row */}
           <View style={[styles.statsRow, { borderTopColor: theme.border }]}>
@@ -223,21 +282,53 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             </TouchableOpacity>
           </View>
 
-          {/* Projected Balance Alert Box */}
-          <View style={[styles.projectionBox, { backgroundColor: theme.surfaceVariant }]}>
-            <Ionicons name="calculator-outline" size={18} color={theme.primary} />
-            <View style={styles.projectionTextWrap}>
-              <Text style={[styles.projectionTitle, { color: theme.text }]}>
-                Projeção com Contas Fixas:
-              </Text>
-              <Text style={[styles.projectionSub, { color: theme.textMuted }]}>
-                Saldo previsto até o fim do mês:{' '}
-                <Text style={{ fontWeight: '700', color: projectedBalance >= 0 ? theme.success : theme.danger }}>
-                  {formatPrivateCurrency(projectedBalance, formatCurrency(projectedBalance))}
+          {/* Context Footer Box */}
+          {balanceMode === 'realized' ? (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={() => setBalanceMode('projected')}
+              style={[styles.projectionBox, { backgroundColor: theme.surfaceVariant }]}
+            >
+              <Ionicons name="calculator-outline" size={18} color={theme.primary} />
+              <View style={styles.projectionTextWrap}>
+                <Text style={[styles.projectionTitle, { color: theme.text }]}>
+                  Previsão com Contas Fixas:
                 </Text>
-              </Text>
-            </View>
-          </View>
+                <Text style={[styles.projectionSub, { color: theme.textMuted }]}>
+                  Saldo previsto ao fim do mês:{' '}
+                  <Text style={{ fontWeight: '700', color: projectedBalance >= 0 ? theme.success : theme.danger }}>
+                    {formatPrivateCurrency(projectedBalance, formatCurrency(projectedBalance))}
+                  </Text>
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </TouchableOpacity>
+          ) : (
+            <TouchableOpacity
+              activeOpacity={0.8}
+              onPress={onNavigateToRecurrings}
+              style={[styles.projectionBox, { backgroundColor: `${theme.primary}10` }]}
+            >
+              <Ionicons
+                name={pendingRecurrings.length === 0 ? 'checkmark-circle' : 'list-circle-outline'}
+                size={18}
+                color={pendingRecurrings.length === 0 ? theme.success : theme.primary}
+              />
+              <View style={styles.projectionTextWrap}>
+                <Text style={[styles.projectionTitle, { color: theme.text }]}>
+                  Checklist de Quitações:
+                </Text>
+                <Text style={[styles.projectionSub, { color: theme.textMuted }]}>
+                  {totalRecurringsCount === 0
+                    ? 'Nenhuma conta cadastrada para este mês'
+                    : pendingRecurrings.length === 0
+                    ? 'Todas as contas do mês já foram quitadas! 🎉'
+                    : `${paidRecurringsCount} de ${totalRecurringsCount} contas pagas (${pendingRecurrings.length} pendentes)`}
+                </Text>
+              </View>
+              <Ionicons name="chevron-forward" size={16} color={theme.textMuted} />
+            </TouchableOpacity>
+          )}
         </Card>
 
         {/* Quick Actions */}
@@ -419,9 +510,29 @@ const styles = StyleSheet.create({
     padding: 20,
     marginBottom: 16,
   },
+  heroCardHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 4,
+  },
+  balanceModeToggle: {
+    flexDirection: 'row',
+    borderRadius: 8,
+    padding: 2,
+  },
+  modeTabBtn: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+  },
+  modeTabText: {
+    fontSize: 10,
+    fontWeight: '700',
+  },
   balanceLabel: {
-    fontSize: 13,
-    fontWeight: '600',
+    fontSize: 12,
+    fontWeight: '700',
     textTransform: 'uppercase',
     letterSpacing: 0.5,
   },

@@ -123,7 +123,10 @@ export const DepositGoalModal: React.FC<DepositGoalModalProps> = ({
         placeholder="Ex: 500.00"
         keyboardType="decimal-pad"
         value={amountStr}
-        onChangeText={setAmountStr}
+        onChangeText={(val) => {
+          setAmountStr(val);
+          if (error) setError('');
+        }}
         error={error}
       />
 

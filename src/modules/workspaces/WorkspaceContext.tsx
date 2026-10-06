@@ -17,6 +17,7 @@ interface WorkspaceContextType {
   renameWorkspace: (workspaceId: string, newName: string) => Promise<void>;
   transferOwnership: (workspaceId: string, newOwnerEmail: string) => Promise<{ success: boolean; message: string }>;
   deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; message: string }>;
+  leaveWorkspace: (workspaceId: string) => Promise<{ success: boolean; message: string }>;
   joinWorkspaceByCode: (inviteCode: string) => Promise<{ success: boolean; message: string }>;
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
@@ -388,6 +389,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, message: 'O espaço pessoal não pode ser excluído.' };
     }
 
+    // Regra de Segurança: Apenas o Proprietário pode apagar o espaço
+    const isOwner = target.members.some(
+      (m) =>
+        m.role === 'owner' &&
+        (m.isCurrentUser || (user?.email && m.email.toLowerCase() === user.email.toLowerCase()))
+    );
+    if (!isOwner) {
+      return {
+        success: false,
+        message: 'Apenas o proprietário do espaço tem permissão para excluí-lo. Você pode sair do espaço a qualquer momento.',
+      };
+    }
+
     const updated = workspaces.filter((w) => w.id !== workspaceId);
     if (updated.length === 0) {
       return { success: false, message: 'Não é possível excluir o único espaço restante.' };
@@ -417,6 +431,58 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch {}
 
     return { success: true, message: 'Espaço e todos os seus dados foram excluídos com sucesso.' };
+  };
+
+  const leaveWorkspace = async (
+    workspaceId: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const target = workspaces.find((w) => w.id === workspaceId);
+    if (!target) {
+      return { success: false, message: 'Espaço não encontrado.' };
+    }
+
+    if (target.id === 'ws-solo' || target.type === 'solo') {
+      return { success: false, message: 'Você não pode sair do seu espaço pessoal.' };
+    }
+
+    // Identifica o membro atual
+    const userEmail = user?.email?.toLowerCase().trim() || '';
+    const currentMem = target.members.find(
+      (m) => m.isCurrentUser || (userEmail && m.email.toLowerCase() === userEmail)
+    );
+
+    if (currentMem?.role === 'owner') {
+      return {
+        success: false,
+        message: 'Como proprietário, você não pode sair do espaço. Transfira a propriedade para outro membro antes de sair ou exclua o espaço.',
+      };
+    }
+
+    // Remove localmente o espaço da lista do usuário convidado
+    const updated = workspaces.filter((w) => w.id !== workspaceId);
+    if (activeWorkspaceId === workspaceId) {
+      const fallback = updated.find((w) => w.id === 'ws-solo') || updated[0];
+      await setActiveWorkspace(fallback.id);
+    }
+
+    setWorkspaces(updated);
+    await WorkspaceRepository.saveWorkspaces(updated);
+
+    // Remove o usuário da tabela de membros na nuvem
+    try {
+      const client = await SupabaseService.getClient();
+      if (currentMem?.id) {
+        await client.from('workspace_members').delete().eq('id', currentMem.id);
+      } else if (userEmail) {
+        await client
+          .from('workspace_members')
+          .delete()
+          .eq('workspace_id', workspaceId)
+          .eq('email', userEmail);
+      }
+    } catch {}
+
+    return { success: true, message: `Você saiu do espaço "${target.name}" com sucesso.` };
   };
 
   const joinWorkspaceByCode = async (
@@ -501,6 +567,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         renameWorkspace,
         transferOwnership,
         deleteWorkspace,
+        leaveWorkspace,
         joinWorkspaceByCode,
         currentUserRole,
         canEdit,

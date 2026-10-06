@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWorkspace } from './workspaces/WorkspaceContext';
 import { Transaction, MonthlySummary } from './transactions/types';
 import { TransactionRepository } from './transactions/repository';
@@ -13,6 +14,8 @@ import { CloudSyncService } from '../services/supabase/CloudSyncService';
 import { SupabaseService } from '../services/supabase/supabaseClient';
 import { getCurrentMonthYear } from '../core/utils/date';
 
+export type BalanceMode = 'realized' | 'projected';
+
 interface FinanceContextType {
   // Data filtered for active workspace
   transactions: Transaction[];
@@ -25,6 +28,9 @@ interface FinanceContextType {
   monthlySummary: MonthlySummary & { totalSavedInMonth: number };
   projectedExpense: number;
   projectedBalance: number;
+  balanceMode: BalanceMode;
+  setBalanceMode: (mode: BalanceMode) => Promise<void>;
+  toggleBalanceMode: () => void;
 
   // Selected period
   selectedMonth: number;
@@ -70,6 +76,29 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [allRecurringMonthRecords, setAllRecurringMonthRecords] = useState<RecurringMonthRecord[]>([]);
   const [allBudgets, setAllBudgets] = useState<Budget[]>([]);
   const [allGoals, setAllGoals] = useState<Goal[]>([]);
+
+  // Modo de Saldo: 'realized' (Caixa Real) ou 'projected' (Competência / Previsto Total)
+  const [balanceMode, setBalanceModeState] = useState<BalanceMode>('realized');
+
+  useEffect(() => {
+    AsyncStorage.getItem('@financas:balance_mode_preference')
+      .then((val) => {
+        if (val === 'realized' || val === 'projected') {
+          setBalanceModeState(val);
+        }
+      })
+      .catch(() => {});
+  }, []);
+
+  const setBalanceMode = async (newMode: BalanceMode) => {
+    setBalanceModeState(newMode);
+    await AsyncStorage.setItem('@financas:balance_mode_preference', newMode);
+  };
+
+  const toggleBalanceMode = () => {
+    const next = balanceMode === 'realized' ? 'projected' : 'realized';
+    setBalanceMode(next);
+  };
 
   const reloadAll = async () => {
     // 1. Instant local load
@@ -584,6 +613,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         monthlySummary,
         projectedExpense,
         projectedBalance,
+        balanceMode,
+        setBalanceMode,
+        toggleBalanceMode,
         selectedMonth,
         selectedYear,
         setSelectedPeriod,

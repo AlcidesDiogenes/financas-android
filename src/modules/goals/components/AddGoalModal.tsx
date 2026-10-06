@@ -46,7 +46,8 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
   const [monthsAhead, setMonthsAhead] = useState('12');
   const [notes, setNotes] = useState('');
   const [selectedIconIndex, setSelectedIconIndex] = useState(0);
-  const [error, setError] = useState('');
+  const [titleError, setTitleError] = useState('');
+  const [targetError, setTargetError] = useState('');
 
   React.useEffect(() => {
     if (initialData) {
@@ -75,20 +76,29 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
       setNotes('');
       setSelectedIconIndex(0);
     }
-    setError('');
+    setTitleError('');
+    setTargetError('');
   }, [initialData, visible]);
 
   const handleSave = () => {
+    let hasError = false;
+
     if (!title.trim()) {
-      setError('Informe o título da meta');
-      return;
+      setTitleError('Informe o título da meta');
+      hasError = true;
+    } else {
+      setTitleError('');
     }
 
     const target = parseFloat(targetAmountStr.replace(',', '.'));
     if (isNaN(target) || target <= 0) {
-      setError('Informe um valor de objetivo válido');
-      return;
+      setTargetError('Informe um valor de objetivo válido maior que zero');
+      hasError = true;
+    } else {
+      setTargetError('');
     }
+
+    if (hasError) return;
 
     const initial = parseFloat(initialAmountStr.replace(',', '.')) || 0;
     const months = parseInt(monthsAhead, 10) || 12;
@@ -96,7 +106,6 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
     const deadline = new Date();
     deadline.setMonth(deadline.getMonth() + months);
 
-    setError('');
     onSubmit({
       title: title.trim(),
       targetAmount: target,
@@ -120,7 +129,11 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
         label="Nome da Meta"
         placeholder="Ex: Reserva de Emergência, Comprar Carro"
         value={title}
-        onChangeText={setTitle}
+        onChangeText={(val) => {
+          setTitle(val);
+          if (titleError) setTitleError('');
+        }}
+        error={titleError}
       />
 
       <View style={styles.row}>
@@ -130,7 +143,11 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
             placeholder="0.00"
             keyboardType="decimal-pad"
             value={targetAmountStr}
-            onChangeText={setTargetAmountStr}
+            onChangeText={(val) => {
+              setTargetAmountStr(val);
+              if (targetError) setTargetError('');
+            }}
+            error={targetError}
           />
         </View>
 
@@ -152,10 +169,6 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
         value={monthsAhead}
         onChangeText={setMonthsAhead}
       />
-
-      {error ? (
-        <Text style={[styles.error, { color: theme.danger }]}>{error}</Text>
-      ) : null}
 
       <Text style={[styles.sectionLabel, { color: theme.textMuted }]}>
         Ícone & Categoria
