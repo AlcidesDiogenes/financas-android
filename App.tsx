@@ -30,8 +30,8 @@ const MainAppContent: React.FC = () => {
   const [relevantReleaseNotes, setRelevantReleaseNotes] = useState<ReleaseNote[]>([]);
 
   const onboardingKey = user?.id
-    ? `@financas:onboarding_completed_${user.id}`
-    : '@financas:onboarding_completed_guest';
+    ? `@financas:onboarding_v1_0_completed_${user.id}`
+    : '@financas:onboarding_v1_0_completed_guest';
 
   useEffect(() => {
     checkOnboarding();

@@ -11,12 +11,11 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../core/theme/ThemeContext';
-import { Button } from '../core/components/Button';
 import { Ionicons } from '@expo/vector-icons';
 
 const { width } = Dimensions.get('window');
 
-export const ONBOARDING_COMPLETED_KEY = '@financas:onboarding_completed_v1';
+export const ONBOARDING_COMPLETED_KEY = '@financas:onboarding_v1_0_completed';
 
 interface OnboardingSlide {
   id: string;
@@ -36,97 +35,97 @@ interface OnboardingSlide {
 const SLIDES: OnboardingSlide[] = [
   {
     id: '1',
-    badge: 'Visão Geral',
-    title: 'Painel & Saldo Líquido',
-    subtitle: 'Controle absoluto de cada centavo em tempo real',
+    badge: 'Painel Financeiro',
+    title: 'Saldo Real vs. Previsto Total',
+    subtitle: 'Controle absoluto do presente e projeção do futuro',
     description:
-      'Consolida receitas, despesas e economias do mês em um resumo financeiro inteligente e automático.',
+      'Alterne instantaneamente entre o saldo estritamente realizado de caixa e a projeção completa do mês considerando todas as suas contas.',
     icon: 'wallet',
     color: '#3B82F6',
     highlights: [
       {
+        icon: 'swap-horizontal',
+        label: 'Modo Duplo de Saldo (Real & Previsto)',
+        detail: 'Veja o saldo das contas quitadas ou a previsão total de fechamento do mês com 1 toque.',
+      },
+      {
         icon: 'trending-up',
         label: 'Receitas & Entradas',
-        detail: 'Salários, rendas fixas e ganhos extras somados no mês.',
+        detail: 'Consolide salários, rendas fixas e receitas planejadas com cálculo em tempo real.',
       },
       {
         icon: 'trending-down',
-        label: 'Despesas Realizadas',
-        detail: 'Tudo o que já foi pago ou debitado na competência.',
+        label: 'Despesas Realizadas & Previstas',
+        detail: 'Acompanhe custos pagos e monitore o impacto das pendências no fechamento.',
       },
       {
-        icon: 'cash-outline',
-        label: 'Economia Guardada',
-        detail: 'Valores guardados no banco ou aportes de investimentos.',
-      },
-      {
-        icon: 'stats-chart',
-        label: 'Projeção Inteligente',
-        detail: 'Previsão de saldo até o fim do mês considerando contas pendentes.',
+        icon: 'pie-chart',
+        label: 'Economia & Reservas Guardadas',
+        detail: 'Visualize o dinheiro economizado no mês sem distorcer o fluxo de caixa corrente.',
       },
     ],
   },
   {
     id: '2',
-    badge: 'Automação & Vigência',
-    title: 'Contas Fixas & Rendas',
-    subtitle: 'Vigência programada e ajuste mensal inteligente',
+    badge: 'Agilidade & Gestos',
+    title: 'Contas Recorrentes & Deslize',
+    subtitle: 'Pague e organize deslizando para os lados',
     description:
-      'Preveja salários e despesas fixas com controle de validade e histórico independente por mês.',
+      'Gerencie contas fixas e salários com vigência programada, competências independentes e ações instantâneas por gestos.',
     icon: 'repeat',
     color: '#8B5CF6',
     highlights: [
       {
-        icon: 'hourglass-outline',
-        label: 'Vigência com Início e Fim',
-        detail: 'Defina até quando uma renda ou conta vigora (ex: contratos ou parcelas).',
+        icon: 'swap-horizontal-outline',
+        label: 'Ações por Deslize (Swipe)',
+        detail: 'Deslize o item da conta para pagar/receber rapidamente ou excluir com segurança.',
+      },
+      {
+        icon: 'options-outline',
+        label: 'Inversão de Lados nos Ajustes',
+        detail: 'Defina nas preferências qual lado do gesto você prefere para dar baixa e para apagar.',
+      },
+      {
+        icon: 'calendar-outline',
+        label: 'Vigência Programada',
+        detail: 'Defina mês de início e fim da recorrência (ex: parcelas ou contratos com término).',
       },
       {
         icon: 'flash-outline',
         label: 'Variação por Competência',
-        detail: 'Água, luz ou cartão: ajuste valor e status do mês sem estragar o padrão.',
-      },
-      {
-        icon: 'create-outline',
-        label: 'Edição Completa da Recorrência',
-        detail: 'Edite valor base, categoria, vencimento ou vigência quando quiser.',
-      },
-      {
-        icon: 'checkmark-circle-outline',
-        label: 'Status em 1 Toque',
-        detail: 'Marque como "Pago" ou "Recebido" diretamente na lista do mês.',
+        detail: 'Altere o valor ou status de contas flutuantes (luz, água, cartão) sem afetar o padrão futuro.',
       },
     ],
   },
   {
     id: '3',
-    badge: 'Extrato Avançado',
-    title: 'Competências & Períodos',
-    subtitle: 'Filtre por mês ou selecione qualquer intervalo de datas',
+    badge: 'Histórico Completo',
+    title: 'Extrato & Intervalos Livres',
+    subtitle: 'Filtre por mês ou qualquer período de datas',
     description:
-      'Histórico completo com alternância entre mês fechado ou período personalizado livre.',
+      'Navegação temporal completa entre meses fechados ou seleção personalizada de datas com exportação em CSV.',
     icon: 'calendar',
     color: '#0EA5E9',
     highlights: [
       {
-        icon: 'calendar-outline',
+        icon: 'calendar-number-outline',
         label: 'Navegação por Competência',
-        detail: 'Alterne rapidamente mês a mês para acompanhar o fechamento.',
+        detail: 'Alterne mês a mês de forma ágil para acompanhar o histórico de fechamentos.',
       },
       {
-        icon: 'options-outline',
-        label: 'Novo Filtro por Período',
-        detail: 'Selecione datas De/Até (ex: 05/01 a 20/02) com saldo total do intervalo.',
+        icon: 'filter-outline',
+        label: 'Filtro por Período Personalizado',
+        detail: 'Consulte intervalos livres (ex: 05/01 a 20/02) com soma e saldo do intervalo.',
       },
       {
         icon: 'pricetags-outline',
-        label: 'Categorias & Responsáveis',
-        detail: 'Classifique por Alimentação, Moradia, etc., e identifique o pagador.',
+        label: 'Categorias & Participantes',
+        detail: 'Saiba exatamente onde o dinheiro foi investido e identifique o membro responsável.',
       },
       {
         icon: 'download-outline',
-        label: 'Exportação CSV do Intervalo',
-        detail: 'Baixe relatórios mensais ou do período selecionado para o Excel.',
+        label: 'Exportação para Excel (CSV)',
+        detail: 'Baixe relatórios detalhados com um toque para abrir em planilhas ou prestar contas.',
       },
     ],
   },
@@ -134,95 +133,95 @@ const SLIDES: OnboardingSlide[] = [
     id: '4',
     badge: 'Planejamento Inteligente',
     title: 'Tetos de Gastos & Metas',
-    subtitle: 'Orçamentos contínuos com vigência programada',
+    subtitle: 'Orçamentos contínuos e cofrinhos para sonhos',
     description:
-      'Defina limites de gastos sem precisar recriar todo mês e acompanhe suas metas de economia.',
+      'Defina limites inteligentes para não estourar o orçamento e guarde dinheiro para suas metas com acompanhamento visual.',
     icon: 'flag',
     color: '#10B981',
     highlights: [
       {
         icon: 'speedometer-outline',
         label: 'Tetos com Vigência Contínua',
-        detail: 'Limites válidos para todos os meses do período, sem cópias manuais.',
+        detail: 'Estabeleça limites por categoria que se renovam automaticamente mês a mês.',
       },
       {
         icon: 'alert-circle-outline',
-        label: 'Alertas Visuais de Limite',
-        detail: 'Barras que avisam quando o gasto da categoria está perto do teto.',
+        label: 'Barras de Alerta Visual',
+        detail: 'Cores dinâmicas indicando o percentual consumido antes de atingir o limite.',
       },
       {
         icon: 'trophy-outline',
         label: 'Metas Financeiras & Depósitos',
-        detail: 'Acompanhe sonhos (reserva, viagem) com depósitos e barra de progresso.',
+        detail: 'Crie cofrinhos com prazos e acompanhe o progresso com aportes e resgates.',
       },
       {
-        icon: 'pie-chart-outline',
+        icon: 'stats-chart-outline',
         label: 'Orçado vs. Realizado',
-        detail: 'Descubra exatamente onde está economizando e onde pode melhorar.',
+        detail: 'Visão comparativa clara para identificar economias e oportunidades de melhoria.',
       },
     ],
   },
   {
     id: '5',
-    badge: 'Multi-Espaços',
-    title: 'Espaços de Trabalho',
-    subtitle: 'Sincronização em tempo real entre celulares',
+    badge: 'Colaboração em Nuvem',
+    title: 'Espaços & Sincronização',
+    subtitle: 'Contas conjuntas sem risco de conflito',
     description:
-      'Separe suas contas pessoais e divida orçamentos conjuntos com a família ou sócios.',
+      'Crie múltiplos espaços para finanças pessoais, família ou negócios com sincronização em nuvem e resolução inteligente de edições.',
     icon: 'people',
     color: '#EC4899',
     highlights: [
       {
         icon: 'briefcase-outline',
-        label: 'Múltiplos Espaços',
-        detail: 'Alterne entre Pessoal, Família ou Empresa direto pelo menu.',
+        label: 'Múltiplos Espaços de Trabalho',
+        detail: 'Alterne entre Finanças Pessoais, Casal, Família ou Empresa direto pelo menu.',
       },
       {
         icon: 'logo-whatsapp',
         label: 'Convite Rápido via WhatsApp',
-        detail: 'Compartilhe o código de acesso para familiares entrarem em segundos.',
+        detail: 'Compartilhe o código de acesso para familiares ou sócios entrarem em segundos.',
       },
       {
-        icon: 'sync-outline',
-        label: 'Sincronização em Tempo Real',
-        detail: 'Lançamentos aparecem instantaneamente nos aparelhos conectados.',
+        icon: 'sync-circle-outline',
+        label: 'Sincronização Inteligente (Nuvem)',
+        detail: 'Atualizações em tempo real com reconciliação segura por carimbo de data/hora.',
       },
       {
         icon: 'shield-outline',
-        label: 'Permissões Sob Medida',
-        detail: 'Defina quem pode adicionar transações ou apenas visualizar.',
+        label: 'Controle de Papéis & Permissões',
+        detail: 'Defina quem pode editar ou apenas visualizar, com saída e transferência de titularidade.',
       },
     ],
   },
   {
     id: '6',
-    badge: 'Segurança & Ajustes',
-    title: 'Privacidade & Preferências',
-    subtitle: 'Central organizada, biometria e tema escuro',
+    badge: 'Padrão Fintech',
+    title: 'Segurança & Personalização',
+    subtitle: 'Proteção biométrica, discrição e temas',
     description:
-      'Use o aplicativo com discrição em público e configure cada detalhe do seu jeito.',
+      'Configurações completas para deixar o aplicativo com a sua cara, com bloqueio seguro e modo de privacidade com 1 toque.',
     icon: 'shield-checkmark',
     color: '#F59E0B',
     highlights: [
       {
         icon: 'eye-off-outline',
         label: 'Modo Privacidade (Olhinho)',
-        detail: 'Oculte todos os valores na tela com 1 toque para usar em público.',
+        detail: 'Oculte todos os valores na tela com 1 toque para consultar o app em público.',
       },
       {
         icon: 'finger-print-outline',
         label: 'Bloqueio por Biometria',
-        detail: 'Proteja a abertura com digital ou reconhecimento facial.',
+        detail: 'Proteja seus dados com abertura rápida por digital ou reconhecimento facial.',
       },
       {
         icon: 'moon-outline',
-        label: 'Tema Escuro (Dark Mode)',
-        detail: 'Visual elegante e confortável para os olhos durante a noite.',
+        label: 'Tema Escuro (Dark Mode) & Claro',
+        detail: 'Visual refinado e confortável para os olhos durante o dia e a noite.',
       },
       {
-        icon: 'settings-outline',
-        label: 'Central de Ajustes Organizada',
-        detail: 'Acesso rápido a perfil, sincronização em nuvem e exportação de dados.',
+        icon: 'options-outline',
+        label: 'Preferências em Folha Inferior',
+        detail: 'Personalize estilo dos avisos na barra inferior (número, bolinha ou limpa) com modais modernos.',
       },
     ],
   },
@@ -247,19 +246,31 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
 
   const handleNext = () => {
     if (currentIndex < SLIDES.length - 1) {
+      const nextIdx = currentIndex + 1;
       flatListRef.current?.scrollToIndex({
-        index: currentIndex + 1,
+        index: nextIdx,
         animated: true,
       });
-      setCurrentIndex(currentIndex + 1);
+      setCurrentIndex(nextIdx);
     } else {
       completeOnboarding();
     }
   };
 
+  const handlePrev = () => {
+    if (currentIndex > 0) {
+      const prevIdx = currentIndex - 1;
+      flatListRef.current?.scrollToIndex({
+        index: prevIdx,
+        animated: true,
+      });
+      setCurrentIndex(prevIdx);
+    }
+  };
+
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Top Bar with Skip - with safe status bar inset */}
+      {/* Top Bar with Logo, Step Indicator & Skip */}
       <View
         style={[
           styles.topBar,
@@ -273,12 +284,18 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
             <Ionicons name="wallet" size={16} color={theme.primary} />
           </View>
           <Text style={[styles.logoText, { color: theme.text }]}>Finanças</Text>
+          <View style={[styles.stepPill, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            <Text style={[styles.stepPillText, { color: theme.textMuted }]}>
+              {currentIndex + 1} de {SLIDES.length}
+            </Text>
+          </View>
         </View>
 
         <TouchableOpacity
           onPress={completeOnboarding}
           hitSlop={{ top: 12, bottom: 12, left: 12, right: 12 }}
           style={styles.skipBtn}
+          activeOpacity={0.7}
         >
           <Text style={[styles.skipText, { color: theme.textMuted }]}>
             Pular Tutorial
@@ -304,12 +321,15 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
             contentContainerStyle={styles.slideContent}
             showsVerticalScrollIndicator={false}
           >
-            {/* Header Icon & Badge */}
+            {/* Header Icon, Badge, Title & Description */}
             <View style={styles.headerBlock}>
               <View
                 style={[
                   styles.iconWrap,
-                  { backgroundColor: `${item.color}15`, borderColor: `${item.color}30` },
+                  {
+                    backgroundColor: `${item.color}15`,
+                    borderColor: `${item.color}35`,
+                  },
                 ]}
               >
                 <Ionicons name={item.icon} size={42} color={item.color} />
@@ -381,8 +401,12 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
         {/* Pagination Dots */}
         <View style={styles.dotsRow}>
           {SLIDES.map((_, i) => (
-            <View
+            <TouchableOpacity
               key={i}
+              onPress={() => {
+                flatListRef.current?.scrollToIndex({ index: i, animated: true });
+                setCurrentIndex(i);
+              }}
               style={[
                 styles.dot,
                 {
@@ -394,24 +418,48 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
           ))}
         </View>
 
-        {/* Action Button */}
-        <Button
-          title={
-            currentIndex === SLIDES.length - 1
-              ? 'Começar a Usar o App 🚀'
-              : 'Próximo Passo'
-          }
-          variant="primary"
-          icon={
+        {/* Action Buttons Row */}
+        <View style={styles.actionRow}>
+          {currentIndex > 0 && (
+            <TouchableOpacity
+              onPress={handlePrev}
+              style={[
+                styles.prevBtn,
+                {
+                  backgroundColor: theme.card,
+                  borderColor: theme.border,
+                },
+              ]}
+              activeOpacity={0.7}
+            >
+              <Ionicons name="arrow-back" size={18} color={theme.text} />
+              <Text style={[styles.prevBtnText, { color: theme.text }]}>
+                Voltar
+              </Text>
+            </TouchableOpacity>
+          )}
+
+          <TouchableOpacity
+            onPress={handleNext}
+            style={[
+              styles.nextBtn,
+              { backgroundColor: theme.primary },
+              currentIndex === 0 && { flex: 1 },
+            ]}
+            activeOpacity={0.8}
+          >
+            <Text style={styles.nextBtnText}>
+              {currentIndex === SLIDES.length - 1
+                ? 'Começar a Usar o App 🚀'
+                : 'Próximo Passo'}
+            </Text>
             <Ionicons
               name={currentIndex === SLIDES.length - 1 ? 'rocket' : 'arrow-forward'}
               size={18}
               color="#FFF"
             />
-          }
-          onPress={handleNext}
-          style={styles.mainBtn}
-        />
+          </TouchableOpacity>
+        </View>
       </View>
     </View>
   );
@@ -431,6 +479,7 @@ const styles = StyleSheet.create({
   logoRow: {
     flexDirection: 'row',
     alignItems: 'center',
+    gap: 8,
   },
   logoBadge: {
     width: 28,
@@ -438,11 +487,22 @@ const styles = StyleSheet.create({
     borderRadius: 8,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 8,
   },
   logoText: {
     fontSize: 17,
     fontWeight: '800',
+    letterSpacing: -0.3,
+  },
+  stepPill: {
+    paddingHorizontal: 8,
+    paddingVertical: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    marginLeft: 4,
+  },
+  stepPillText: {
+    fontSize: 11,
+    fontWeight: '700',
   },
   skipBtn: {
     paddingVertical: 4,
@@ -490,6 +550,7 @@ const styles = StyleSheet.create({
     fontWeight: '800',
     textAlign: 'center',
     marginBottom: 4,
+    letterSpacing: -0.4,
   },
   subtitle: {
     fontSize: 14,
@@ -543,14 +604,50 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    marginBottom: 12,
+    marginBottom: 14,
     gap: 6,
   },
   dot: {
     height: 6,
     borderRadius: 3,
   },
-  mainBtn: {
-    width: '100%',
+  actionRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 12,
+  },
+  prevBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    borderWidth: 1,
+    gap: 6,
+  },
+  prevBtnText: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  nextBtn: {
+    flex: 2,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    paddingHorizontal: 20,
+    borderRadius: 14,
+    gap: 8,
+    elevation: 2,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.15,
+    shadowRadius: 4,
+  },
+  nextBtnText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '700',
   },
 });
