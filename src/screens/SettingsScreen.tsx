@@ -35,7 +35,7 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWorkspaces }) => {
   const { theme, isDark, toggleTheme } = useTheme();
-  const { user, signOut, deleteAccount, updatePassword } = useAuth();
+  const { user, signOut, deleteAccount, updatePassword, updateProfile } = useAuth();
   const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
   const { transactions, selectedMonth, selectedYear, reloadAll } = useFinance();
@@ -53,12 +53,19 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [updateStatusText, setUpdateStatusText] = useState('');
   const [isReloadingApp, setIsReloadingApp] = useState(false);
 
-  // Modal para Alterar Senha
+  // Modal para Alterar Senha com Confirmação da Senha Atual
   const [showPasswordModal, setShowPasswordModal] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState('');
+
+  // Modal para Editar Nome do Perfil
+  const [showProfileModal, setShowProfileModal] = useState(false);
+  const [editedName, setEditedName] = useState('');
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState('');
 
   // Modal para Transferência de Propriedade de Espaço ao Excluir Conta
   const [showTransferModal, setShowTransferModal] = useState(false);
@@ -70,24 +77,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [selectedNewOwnerEmail, setSelectedNewOwnerEmail] = useState('');
 
   const handleUpdatePassword = async () => {
+    if (!currentPassword) {
+      setPasswordError('Por favor, informe a sua senha atual para continuar.');
+      return;
+    }
     if (!newPassword || newPassword.length < 6) {
       setPasswordError('A nova senha deve ter no mínimo 6 caracteres.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordError('As senhas não coincidem.');
+      setPasswordError('As novas senhas não coincidem.');
       return;
     }
 
     try {
       setPasswordLoading(true);
       setPasswordError('');
-      const res = await updatePassword(newPassword);
+      const res = await updatePassword(currentPassword, newPassword);
       if (res.success) {
         setShowPasswordModal(false);
+        setCurrentPassword('');
         setNewPassword('');
         setConfirmPassword('');
-        Alert.alert('Sucesso', 'Sua senha foi alterada com sucesso!');
+        Alert.alert('Sucesso 🎉', 'Sua senha foi alterada com sucesso!');
       } else {
         setPasswordError(res.error || 'Não foi possível alterar a senha.');
       }
@@ -95,6 +107,29 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       setPasswordError('Erro ao atualizar senha.');
     } finally {
       setPasswordLoading(false);
+    }
+  };
+
+  const handleUpdateProfile = async () => {
+    if (!editedName.trim()) {
+      setProfileError('Por favor, informe seu nome.');
+      return;
+    }
+
+    try {
+      setProfileLoading(true);
+      setProfileError('');
+      const res = await updateProfile(editedName.trim());
+      if (res.success) {
+        setShowProfileModal(false);
+        Alert.alert('Sucesso ✨', 'Seu nome de usuário foi atualizado com sucesso!');
+      } else {
+        setProfileError(res.error || 'Não foi possível atualizar o nome.');
+      }
+    } catch {
+      setProfileError('Erro ao atualizar nome.');
+    } finally {
+      setProfileLoading(false);
     }
   };
 
@@ -361,44 +396,72 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             </View>
 
             <View style={{ flex: 1, marginLeft: 14 }}>
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                <Text style={[styles.profileName, { color: theme.text }]} numberOfLines={1}>
-                  {user ? user.name : 'Modo Offline'}
+              <TouchableOpacity
+                activeOpacity={user ? 0.7 : 1}
+                onPress={() => {
+                  if (user) {
+                    setEditedName(user.name);
+                    setProfileError('');
+                    setShowProfileModal(true);
+                  }
+                }}
+              >
+                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                  <Text style={[styles.profileName, { color: theme.text }]} numberOfLines={1}>
+                    {user ? user.name : 'Modo Offline'}
+                  </Text>
+                  {user && (
+                    <Ionicons name="pencil-sharp" size={14} color={theme.primary} style={{ marginLeft: 2 }} />
+                  )}
+                  <Badge
+                    label={user ? 'Nuvem Ativa' : 'Offline'}
+                    variant={user ? 'success' : 'neutral'}
+                  />
+                </View>
+                <Text style={[styles.profileEmail, { color: theme.textMuted }]} numberOfLines={1}>
+                  {user ? user.email : 'Toque abaixo para conectar sua conta'}
                 </Text>
-                <Badge
-                  label={user ? 'Nuvem Ativa' : 'Offline'}
-                  variant={user ? 'success' : 'neutral'}
-                />
-              </View>
-              <Text style={[styles.profileEmail, { color: theme.textMuted }]} numberOfLines={1}>
-                {user ? user.email : 'Toque abaixo para conectar sua conta'}
-              </Text>
+              </TouchableOpacity>
             </View>
 
             {user ? (
-              <TouchableOpacity
-                onPress={() => {
-                  Alert.alert(
-                    'Sair da Conta',
-                    'Seus lançamentos serão salvos na nuvem antes de desconectar para que você não perca nenhum dado.',
-                    [
-                      { text: 'Cancelar', style: 'cancel' },
-                      {
-                        text: 'Salvar e Sair',
-                        style: 'destructive',
-                        onPress: async () => {
-                          setStatusMessage('Salvando alterações e desconectando...');
-                          await signOut();
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+                <TouchableOpacity
+                  onPress={() => {
+                    setEditedName(user.name);
+                    setProfileError('');
+                    setShowProfileModal(true);
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={[styles.profileActionBtn, { backgroundColor: `${theme.primary}15` }]}
+                >
+                  <Ionicons name="create-outline" size={18} color={theme.primary} />
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  onPress={() => {
+                    Alert.alert(
+                      'Sair da Conta',
+                      'Seus lançamentos serão salvos na nuvem antes de desconectar para que você não perca nenhum dado.',
+                      [
+                        { text: 'Cancelar', style: 'cancel' },
+                        {
+                          text: 'Salvar e Sair',
+                          style: 'destructive',
+                          onPress: async () => {
+                            setStatusMessage('Salvando alterações e desconectando...');
+                            await signOut();
+                          },
                         },
-                      },
-                    ]
-                  );
-                }}
-                hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                style={[styles.profileActionBtn, { backgroundColor: `${theme.danger}15` }]}
-              >
-                <Ionicons name="log-out-outline" size={20} color={theme.danger} />
-              </TouchableOpacity>
+                      ]
+                    );
+                  }}
+                  hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                  style={[styles.profileActionBtn, { backgroundColor: `${theme.danger}15` }]}
+                >
+                  <Ionicons name="log-out-outline" size={20} color={theme.danger} />
+                </TouchableOpacity>
+              </View>
             ) : null}
           </View>
 
@@ -740,6 +803,14 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             </View>
 
             <Input
+              label="Senha Atual"
+              placeholder="Digite sua senha atual"
+              secureTextEntry
+              value={currentPassword}
+              onChangeText={setCurrentPassword}
+            />
+
+            <Input
               label="Nova Senha"
               placeholder="Mínimo 6 caracteres"
               secureTextEntry
@@ -768,13 +839,92 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
               <Button
                 title="Cancelar"
                 variant="outline"
-                onPress={() => setShowPasswordModal(false)}
+                onPress={() => {
+                  setShowPasswordModal(false);
+                  setCurrentPassword('');
+                  setNewPassword('');
+                  setConfirmPassword('');
+                  setPasswordError('');
+                }}
                 style={{ flex: 1, marginRight: 8 }}
               />
               <Button
                 title="Salvar Senha"
                 loading={passwordLoading}
                 onPress={handleUpdatePassword}
+                style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal de Editar Nome de Usuário */}
+      <Modal
+        visible={showProfileModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowProfileModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowProfileModal(false)}
+        >
+          <View
+            style={[
+              styles.passwordModalCard,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+            ]}
+          >
+            <View style={styles.passwordModalHeader}>
+              <View>
+                <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
+                  Editar Perfil 👤
+                </Text>
+                <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
+                  Altere o nome exibido nos seus espaços e relatórios
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowProfileModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={22} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Input
+              label="Nome de Usuário"
+              placeholder="Digite seu nome completo ou apelido"
+              value={editedName}
+              onChangeText={setEditedName}
+              autoCapitalize="words"
+            />
+
+            {profileError ? (
+              <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
+                <Ionicons name="alert-circle" size={16} color={theme.danger} />
+                <Text style={[styles.errorText, { color: theme.danger }]}>
+                  {profileError}
+                </Text>
+              </View>
+            ) : null}
+
+            <View style={styles.passwordModalActions}>
+              <Button
+                title="Cancelar"
+                variant="outline"
+                onPress={() => {
+                  setShowProfileModal(false);
+                  setProfileError('');
+                }}
+                style={{ flex: 1, marginRight: 8 }}
+              />
+              <Button
+                title="Salvar Nome"
+                loading={profileLoading}
+                onPress={handleUpdateProfile}
                 style={{ flex: 1 }}
               />
             </View>

@@ -25,7 +25,8 @@ interface AuthContextType {
   signIn: (email: string, password: string) => Promise<{ success: boolean; error?: string }>;
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
-  updatePassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  updatePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  updateProfile: (newName: string) => Promise<{ success: boolean; error?: string }>;
   signOut: () => Promise<void>;
   deleteAccount: () => Promise<{ success: boolean; error?: string }>;
   skipAuth: () => void;
@@ -257,14 +258,86 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const updatePassword = async (
+    currentPassword: string,
     newPassword: string
   ): Promise<{ success: boolean; error?: string }> => {
     try {
+      if (!user?.email) {
+        return { success: false, error: 'Usuário não autenticado.' };
+      }
+
       const client = await SupabaseService.getClient();
+
+      // 1. Confirmação obrigatória da senha atual via re-autenticação
+      const { error: verifyError } = await client.auth.signInWithPassword({
+        email: user.email.trim(),
+        password: currentPassword,
+      });
+
+      if (verifyError) {
+        return {
+          success: false,
+          error: 'A senha atual informada está incorreta. Verifique e tente novamente.',
+        };
+      }
+
+      // 2. Atualiza para a nova senha no Supabase
       const { error } = await client.auth.updateUser({ password: newPassword });
       if (error) {
         return { success: false, error: formatAuthError(error.message) };
       }
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: formatAuthError(e?.message) };
+    }
+  };
+
+  const updateProfile = async (
+    newName: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      if (!user) {
+        return { success: false, error: 'Usuário não autenticado.' };
+      }
+
+      const trimmedName = newName.trim();
+      if (!trimmedName) {
+        return { success: false, error: 'O nome não pode ficar em branco.' };
+      }
+
+      const client = await SupabaseService.getClient();
+
+      // Atualiza os metadados do usuário no Supabase
+      const { data, error } = await client.auth.updateUser({
+        data: { name: trimmedName },
+      });
+
+      if (error) {
+        return { success: false, error: formatAuthError(error.message) };
+      }
+
+      const updatedProfile: AuthUser = {
+        ...user,
+        name: trimmedName,
+      };
+
+      setUser(updatedProfile);
+      await AsyncStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(updatedProfile));
+
+      // Atualiza também o nome na lista de membros dos workspaces locais
+      try {
+        const storedWs = await WorkspaceRepository.getWorkspaces();
+        const updatedWorkspaces = storedWs.map((ws) => ({
+          ...ws,
+          members: ws.members.map((m) =>
+            m.email.toLowerCase() === user.email.toLowerCase()
+              ? { ...m, name: trimmedName }
+              : m
+          ),
+        }));
+        await WorkspaceRepository.saveWorkspaces(updatedWorkspaces);
+      } catch {}
+
       return { success: true };
     } catch (e: any) {
       return { success: false, error: formatAuthError(e?.message) };
@@ -391,6 +464,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resendVerificationEmail,
         resetPassword,
         updatePassword,
+        updateProfile,
         signOut,
         deleteAccount,
         skipAuth,
