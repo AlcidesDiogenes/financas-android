@@ -7,6 +7,7 @@ import {
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useTheme } from '../core/theme/ThemeContext';
+import { useBottomBarBadge } from '../core/theme/BottomBarBadgeContext';
 import { useFinance } from '../modules/FinanceContext';
 import { isRecurringActiveInMonth } from '../modules/recurrings/types';
 import { HomeScreen } from '../screens/HomeScreen';
@@ -36,6 +37,7 @@ const TABS: TabConfig[] = [
 
 export const MainNavigator: React.FC = () => {
   const { theme, isDark } = useTheme();
+  const { badgeStyle } = useBottomBarBadge();
   const insets = useSafeAreaInsets();
   const {
     recurrings,
@@ -172,17 +174,27 @@ export const MainNavigator: React.FC = () => {
                   />
 
                   {/* Recurrings Pending Badge */}
-                  {tab.key === 'recurrings' && pendingRecurringsCount > 0 && (
-                    <View style={styles.badgeBadge}>
-                      <Text style={styles.badgeBadgeText}>
-                        {pendingRecurringsCount > 9 ? '9+' : pendingRecurringsCount}
-                      </Text>
-                    </View>
+                  {tab.key === 'recurrings' && pendingRecurringsCount > 0 && badgeStyle !== 'none' && (
+                    badgeStyle === 'number' ? (
+                      <View style={styles.badgeBadge}>
+                        <Text style={styles.badgeBadgeText}>
+                          {pendingRecurringsCount > 9 ? '9+' : pendingRecurringsCount}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.badgeDot, { backgroundColor: '#EF4444' }]} />
+                    )
                   )}
 
                   {/* Over-Budget Alert Badge */}
-                  {tab.key === 'planning' && hasOverBudget && (
-                    <View style={styles.badgeDot} />
+                  {tab.key === 'planning' && hasOverBudget && badgeStyle !== 'none' && (
+                    badgeStyle === 'number' ? (
+                      <View style={[styles.badgeBadge, { backgroundColor: '#F59E0B' }]}>
+                        <Text style={styles.badgeBadgeText}>!</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.badgeDot} />
+                    )
                   )}
                 </View>
 

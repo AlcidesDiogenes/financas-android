@@ -69,7 +69,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
 
         <View style={styles.subInfo}>
           <Text style={[styles.subText, { color: theme.textMuted }]}>
-            {recurring.type === 'income' ? 'Recebe todo dia' : 'Vence todo dia'} {recurring.dueDay}
+            {recurring.type === 'income' ? 'Recebe dia' : 'Vence dia'} {recurring.dueDay}
           </Text>
           <Text style={[styles.dot, { color: theme.textMuted }]}>•</Text>
           <Text style={[styles.subText, { color: theme.textMuted }]}>
@@ -88,7 +88,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         {vigenciaLabel && (
           <View style={styles.vigenciaRow}>
             <Ionicons name="time-outline" size={12} color={theme.textMuted} style={{ marginRight: 3 }} />
-            <Text style={[styles.vigenciaText, { color: theme.textMuted }]}>
+            <Text style={[styles.vigenciaText, { color: theme.textMuted }]} numberOfLines={1}>
               {vigenciaLabel}
             </Text>
           </View>
@@ -107,6 +107,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
               styles.amount,
               { color: recurring.type === 'income' ? theme.success : theme.text },
             ]}
+            numberOfLines={1}
           >
             {recurring.type === 'income' ? `+ ${formatCurrency(recurring.amount)}` : formatCurrency(recurring.amount)}
           </Text>
@@ -164,21 +165,24 @@ const styles = StyleSheet.create({
   container: {
     flexDirection: 'row',
     alignItems: 'center',
-    padding: 14,
+    padding: 12,
     borderRadius: 14,
     borderWidth: 1,
     marginBottom: 8,
   },
   iconContainer: {
-    width: 44,
-    height: 44,
+    width: 42,
+    height: 42,
     borderRadius: 12,
     alignItems: 'center',
     justifyContent: 'center',
-    marginRight: 12,
+    marginRight: 10,
+    flexShrink: 0,
   },
   info: {
     flex: 1,
+    minWidth: 0,
+    marginRight: 8,
   },
   titleRow: {
     flexDirection: 'row',
@@ -186,18 +190,19 @@ const styles = StyleSheet.create({
     marginBottom: 2,
   },
   title: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
   },
   subInfo: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     alignItems: 'center',
   },
   subText: {
     fontSize: 12,
   },
   dot: {
-    marginHorizontal: 6,
+    marginHorizontal: 4,
     fontSize: 12,
   },
   vigenciaRow: {
@@ -211,12 +216,12 @@ const styles = StyleSheet.create({
   },
   right: {
     alignItems: 'flex-end',
-    marginLeft: 8,
+    justifyContent: 'center',
+    flexShrink: 0,
   },
   amount: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '700',
-    marginBottom: 4,
   },
   amountTouchable: {
     flexDirection: 'row',
@@ -224,7 +229,7 @@ const styles = StyleSheet.create({
     marginBottom: 4,
   },
   assignedBadge: {
-    fontSize: 12,
+    fontSize: 11,
     fontWeight: '600',
   },
   actionsRow: {

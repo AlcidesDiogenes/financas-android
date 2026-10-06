@@ -9,10 +9,13 @@ import {
   TouchableOpacity,
   Modal,
   ActivityIndicator,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../core/theme/ThemeContext';
+import { useBottomBarBadge, BottomBarBadgeStyle } from '../core/theme/BottomBarBadgeContext';
 import { useAuth } from '../services/auth/AuthContext';
 import { useSecurity } from '../services/security/SecurityContext';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
@@ -35,6 +38,7 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWorkspaces }) => {
   const { theme, isDark, toggleTheme } = useTheme();
+  const { badgeStyle, setBadgeStyle } = useBottomBarBadge();
   const { user, signOut, deleteAccount, updatePassword, updateProfile } = useAuth();
   const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
@@ -395,7 +399,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
               </Text>
             </View>
 
-            <View style={{ flex: 1, marginLeft: 14 }}>
+            <View style={{ flex: 1, marginLeft: 12, marginRight: 8, minWidth: 0 }}>
               <TouchableOpacity
                 activeOpacity={user ? 0.7 : 1}
                 onPress={() => {
@@ -406,12 +410,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                   }
                 }}
               >
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
-                  <Text style={[styles.profileName, { color: theme.text }]} numberOfLines={1}>
+                <View style={{ flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginBottom: 2 }}>
+                  <Text style={[styles.profileName, { color: theme.text, flexShrink: 1 }]} numberOfLines={1}>
                     {user ? user.name : 'Modo Offline'}
                   </Text>
                   {user && (
-                    <Ionicons name="pencil-sharp" size={14} color={theme.primary} style={{ marginLeft: 2 }} />
+                    <Ionicons name="pencil-sharp" size={13} color={theme.primary} />
                   )}
                   <Badge
                     label={user ? 'Nuvem Ativa' : 'Offline'}
@@ -425,7 +429,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             </View>
 
             {user ? (
-              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <TouchableOpacity
                   onPress={() => {
                     setEditedName(user.name);
@@ -609,6 +613,84 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             />
           </View>
 
+          <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
+
+          {/* Estilo de Avisos na Barra Inferior */}
+          <View style={styles.cellColumn}>
+            <View style={styles.cell}>
+              <View style={[styles.cellIconWrap, { backgroundColor: '#EF444420' }]}>
+                <Ionicons name="notifications-outline" size={20} color="#EF4444" />
+              </View>
+              <View style={styles.cellTextWrap}>
+                <Text style={[styles.cellTitle, { color: theme.text }]}>
+                  Avisos na Barra Inferior
+                </Text>
+                <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                  {badgeStyle === 'number'
+                    ? 'Exibindo contador numérico de pendências'
+                    : badgeStyle === 'dot'
+                    ? 'Exibindo indicador discreto (bolinha)'
+                    : 'Avisos e alertas ocultos na barra'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.badgeOptionRow}>
+              {(
+                [
+                  { id: 'number', label: 'Número', icon: '123' },
+                  { id: 'dot', label: 'Bolinha', icon: 'ellipse' },
+                  { id: 'none', label: 'Nenhum', icon: 'close-circle-outline' },
+                ] as const
+              ).map((opt) => {
+                const isSelected = badgeStyle === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    onPress={() => setBadgeStyle(opt.id as BottomBarBadgeStyle)}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.badgeOptionBtn,
+                      {
+                        backgroundColor: isSelected ? `${theme.primary}15` : theme.surfaceVariant,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.badgeOptionContent}>
+                      {opt.id === 'number' && (
+                        <View style={[styles.previewBadgeNum, { backgroundColor: '#EF4444' }]}>
+                          <Text style={styles.previewBadgeNumText}>3</Text>
+                        </View>
+                      )}
+                      {opt.id === 'dot' && (
+                        <View style={[styles.previewBadgeDot, { backgroundColor: '#EF4444' }]} />
+                      )}
+                      {opt.id === 'none' && (
+                        <Ionicons
+                          name="eye-off-outline"
+                          size={14}
+                          color={isSelected ? theme.primary : theme.textMuted}
+                        />
+                      )}
+                      <Text
+                        style={[
+                          styles.badgeOptionLabel,
+                          {
+                            color: isSelected ? theme.primary : theme.text,
+                            fontWeight: isSelected ? '700' : '500',
+                          },
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
           {/* Alterar Senha (apenas quando logado com conta) */}
           {user ? (
             <>
@@ -772,91 +854,103 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         visible={showPasswordModal}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setShowPasswordModal(false)}
       >
-        <TouchableOpacity
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
           style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowPasswordModal(false)}
         >
-          <View
-            style={[
-              styles.passwordModalCard,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowPasswordModal(false)}
+          />
+          <ScrollView
+            contentContainerStyle={styles.scrollModalContent}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
           >
-            <View style={styles.passwordModalHeader}>
-              <View>
-                <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
-                  Alterar Senha 🔒
-                </Text>
-                <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
-                  Cadastre sua nova senha de acesso
-                </Text>
+            <View
+              style={[
+                styles.passwordModalCard,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+              ]}
+            >
+              <View style={styles.passwordModalHeader}>
+                <View>
+                  <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
+                    Alterar Senha 🔒
+                  </Text>
+                  <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
+                    Cadastre sua nova senha de acesso
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowPasswordModal(false)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Ionicons name="close" size={22} color={theme.textMuted} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={() => setShowPasswordModal(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={22} color={theme.textMuted} />
-              </TouchableOpacity>
-            </View>
 
-            <Input
-              label="Senha Atual"
-              placeholder="Digite sua senha atual"
-              secureTextEntry
-              value={currentPassword}
-              onChangeText={setCurrentPassword}
-            />
+              <Input
+                label="Senha Atual"
+                placeholder="Digite sua senha atual"
+                secureTextEntry
+                value={currentPassword}
+                onChangeText={setCurrentPassword}
+              />
 
-            <Input
-              label="Nova Senha"
-              placeholder="Mínimo 6 caracteres"
-              secureTextEntry
-              value={newPassword}
-              onChangeText={setNewPassword}
-            />
+              <Input
+                label="Nova Senha"
+                placeholder="Mínimo 6 caracteres"
+                secureTextEntry
+                value={newPassword}
+                onChangeText={setNewPassword}
+              />
 
-            <Input
-              label="Confirmar Nova Senha"
-              placeholder="Repita a nova senha"
-              secureTextEntry
-              value={confirmPassword}
-              onChangeText={setConfirmPassword}
-            />
+              <Input
+                label="Confirmar Nova Senha"
+                placeholder="Repita a nova senha"
+                secureTextEntry
+                value={confirmPassword}
+                onChangeText={setConfirmPassword}
+              />
 
-            {passwordError ? (
-              <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
-                <Ionicons name="alert-circle" size={16} color={theme.danger} />
-                <Text style={[styles.errorText, { color: theme.danger }]}>
-                  {passwordError}
-                </Text>
+              {passwordError ? (
+                <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
+                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
+                  <Text style={[styles.errorText, { color: theme.danger }]}>
+                    {passwordError}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.passwordModalActions}>
+                <Button
+                  title="Cancelar"
+                  variant="outline"
+                  onPress={() => {
+                    setShowPasswordModal(false);
+                    setCurrentPassword('');
+                    setNewPassword('');
+                    setConfirmPassword('');
+                    setPasswordError('');
+                  }}
+                  style={{ flex: 1, marginRight: 8 }}
+                />
+                <Button
+                  title="Salvar Senha"
+                  loading={passwordLoading}
+                  onPress={handleUpdatePassword}
+                  style={{ flex: 1 }}
+                />
               </View>
-            ) : null}
-
-            <View style={styles.passwordModalActions}>
-              <Button
-                title="Cancelar"
-                variant="outline"
-                onPress={() => {
-                  setShowPasswordModal(false);
-                  setCurrentPassword('');
-                  setNewPassword('');
-                  setConfirmPassword('');
-                  setPasswordError('');
-                }}
-                style={{ flex: 1, marginRight: 8 }}
-              />
-              <Button
-                title="Salvar Senha"
-                loading={passwordLoading}
-                onPress={handleUpdatePassword}
-                style={{ flex: 1 }}
-              />
             </View>
-          </View>
-        </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Modal de Editar Nome de Usuário */}
@@ -864,72 +958,84 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         visible={showProfileModal}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setShowProfileModal(false)}
       >
-        <TouchableOpacity
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
           style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowProfileModal(false)}
         >
-          <View
-            style={[
-              styles.passwordModalCard,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setShowProfileModal(false)}
+          />
+          <ScrollView
+            contentContainerStyle={styles.scrollModalContent}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
           >
-            <View style={styles.passwordModalHeader}>
-              <View>
-                <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
-                  Editar Perfil 👤
-                </Text>
-                <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
-                  Altere o nome exibido nos seus espaços e relatórios
-                </Text>
+            <View
+              style={[
+                styles.passwordModalCard,
+                { backgroundColor: theme.surface, borderColor: theme.border },
+              ]}
+            >
+              <View style={styles.passwordModalHeader}>
+                <View>
+                  <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
+                    Editar Perfil 👤
+                  </Text>
+                  <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
+                    Altere o nome exibido nos seus espaços e relatórios
+                  </Text>
+                </View>
+                <TouchableOpacity
+                  onPress={() => setShowProfileModal(false)}
+                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+                >
+                  <Ionicons name="close" size={22} color={theme.textMuted} />
+                </TouchableOpacity>
               </View>
-              <TouchableOpacity
-                onPress={() => setShowProfileModal(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={22} color={theme.textMuted} />
-              </TouchableOpacity>
-            </View>
 
-            <Input
-              label="Nome de Usuário"
-              placeholder="Digite seu nome completo ou apelido"
-              value={editedName}
-              onChangeText={setEditedName}
-              autoCapitalize="words"
-            />
+              <Input
+                label="Nome de Usuário"
+                placeholder="Digite seu nome completo ou apelido"
+                value={editedName}
+                onChangeText={setEditedName}
+                autoCapitalize="words"
+              />
 
-            {profileError ? (
-              <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
-                <Ionicons name="alert-circle" size={16} color={theme.danger} />
-                <Text style={[styles.errorText, { color: theme.danger }]}>
-                  {profileError}
-                </Text>
+              {profileError ? (
+                <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
+                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
+                  <Text style={[styles.errorText, { color: theme.danger }]}>
+                    {profileError}
+                  </Text>
+                </View>
+              ) : null}
+
+              <View style={styles.passwordModalActions}>
+                <Button
+                  title="Cancelar"
+                  variant="outline"
+                  onPress={() => {
+                    setShowProfileModal(false);
+                    setProfileError('');
+                  }}
+                  style={{ flex: 1, marginRight: 8 }}
+                />
+                <Button
+                  title="Salvar Nome"
+                  loading={profileLoading}
+                  onPress={handleUpdateProfile}
+                  style={{ flex: 1 }}
+                />
               </View>
-            ) : null}
-
-            <View style={styles.passwordModalActions}>
-              <Button
-                title="Cancelar"
-                variant="outline"
-                onPress={() => {
-                  setShowProfileModal(false);
-                  setProfileError('');
-                }}
-                style={{ flex: 1, marginRight: 8 }}
-              />
-              <Button
-                title="Salvar Nome"
-                loading={profileLoading}
-                onPress={handleUpdateProfile}
-                style={{ flex: 1 }}
-              />
             </View>
-          </View>
-        </TouchableOpacity>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
 
       {/* Modal de Transferência de Propriedade do Espaço */}
@@ -1297,6 +1403,52 @@ const styles = StyleSheet.create({
     height: 1,
     marginLeft: 48,
   },
+  cellColumn: {
+    paddingVertical: 4,
+  },
+  badgeOptionRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 2,
+    marginBottom: 8,
+    paddingLeft: 48,
+  },
+  badgeOptionBtn: {
+    flex: 1,
+    paddingVertical: 8,
+    paddingHorizontal: 8,
+    borderRadius: 10,
+    borderWidth: 1.5,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  badgeOptionContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  badgeOptionLabel: {
+    fontSize: 12,
+  },
+  previewBadgeNum: {
+    minWidth: 14,
+    height: 14,
+    borderRadius: 7,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 3,
+  },
+  previewBadgeNumText: {
+    color: '#FFF',
+    fontSize: 8,
+    fontWeight: '800',
+    lineHeight: 10,
+  },
+  previewBadgeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+  },
   syncBtn: {
     width: 34,
     height: 34,
@@ -1309,6 +1461,10 @@ const styles = StyleSheet.create({
     backgroundColor: 'rgba(0,0,0,0.5)',
     justifyContent: 'center',
     padding: 20,
+  },
+  scrollModalContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
   },
   passwordModalCard: {
     borderRadius: 20,

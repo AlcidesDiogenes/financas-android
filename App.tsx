@@ -4,6 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from './src/core/theme/ThemeContext';
 import { PrivacyProvider } from './src/core/theme/PrivacyContext';
+import { BottomBarBadgeProvider } from './src/core/theme/BottomBarBadgeContext';
 import { AuthProvider, useAuth } from './src/services/auth/AuthContext';
 import { SecurityProvider } from './src/services/security/SecurityContext';
 import { WorkspaceProvider } from './src/modules/workspaces/WorkspaceContext';
@@ -93,11 +94,13 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <PrivacyProvider>
-          <AuthProvider>
-            <SecurityProvider>
-              <ThemedApp />
-            </SecurityProvider>
-          </AuthProvider>
+          <BottomBarBadgeProvider>
+            <AuthProvider>
+              <SecurityProvider>
+                <ThemedApp />
+              </SecurityProvider>
+            </AuthProvider>
+          </BottomBarBadgeProvider>
         </PrivacyProvider>
       </ThemeProvider>
     </SafeAreaProvider>

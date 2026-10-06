@@ -8,6 +8,8 @@ import {
   Modal,
   TextInput,
   Alert,
+  KeyboardAvoidingView,
+  Platform,
 } from 'react-native';
 import { useTheme } from '../core/theme/ThemeContext';
 import { useFinance } from '../modules/FinanceContext';
@@ -545,89 +547,105 @@ export const TransactionsScreen: React.FC = () => {
         visible={customModalVisible}
         transparent
         animationType="fade"
+        statusBarTranslucent
         onRequestClose={() => setCustomModalVisible(false)}
       >
-        <View style={styles.modalOverlay}>
-          <View
-            style={[
-              styles.modalCard,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
+        <KeyboardAvoidingView
+          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
+          style={styles.modalOverlay}
+        >
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            activeOpacity={1}
+            onPress={() => setCustomModalVisible(false)}
+          />
+          <ScrollView
+            contentContainerStyle={styles.scrollModalContent}
+            keyboardShouldPersistTaps="handled"
+            bounces={false}
           >
-            <View style={styles.modalHeader}>
-              <Ionicons name="calendar-outline" size={22} color={theme.primary} />
-              <Text style={[styles.modalTitle, { color: theme.text }]}>
-                Filtrar por Período
-              </Text>
-            </View>
-
-            <Text style={[styles.modalHelper, { color: theme.textMuted }]}>
-              Digite o intervalo de datas para ver o extrato completo correspondente.
-            </Text>
-
-            <Text style={[styles.inputLabel, { color: theme.textMuted }]}>
-              Data Inicial (DD/MM/AAAA)
-            </Text>
-            <TextInput
+            <View
               style={[
-                styles.dateInput,
-                {
-                  backgroundColor: theme.surfaceVariant,
-                  color: theme.text,
-                  borderColor: theme.border,
-                },
+                styles.modalCard,
+                { backgroundColor: theme.surface, borderColor: theme.border },
               ]}
-              placeholder="01/01/2026"
-              placeholderTextColor={theme.textMuted}
-              keyboardType="numeric"
-              maxLength={10}
-              value={inputStartDate}
-              onChangeText={(val) => setInputStartDate(applyDateMask(val))}
-            />
-
-            <Text style={[styles.inputLabel, { color: theme.textMuted, marginTop: 12 }]}>
-              Data Final (DD/MM/AAAA)
-            </Text>
-            <TextInput
-              style={[
-                styles.dateInput,
-                {
-                  backgroundColor: theme.surfaceVariant,
-                  color: theme.text,
-                  borderColor: theme.border,
-                },
-              ]}
-              placeholder="31/12/2026"
-              placeholderTextColor={theme.textMuted}
-              keyboardType="numeric"
-              maxLength={10}
-              value={inputEndDate}
-              onChangeText={(val) => setInputEndDate(applyDateMask(val))}
-            />
-
-            {dateError ? (
-              <View style={styles.errorBox}>
-                <Ionicons name="alert-circle" size={16} color={theme.danger} />
-                <Text style={[styles.errorText, { color: theme.danger }]}>{dateError}</Text>
+            >
+              <View style={styles.modalHeader}>
+                <Ionicons name="calendar-outline" size={22} color={theme.primary} />
+                <Text style={[styles.modalTitle, { color: theme.text }]}>
+                  Filtrar por Período
+                </Text>
               </View>
-            ) : null}
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity
-                style={[styles.cancelBtn, { borderColor: theme.border }]}
-                onPress={() => setCustomModalVisible(false)}
-              >
-                <Text style={[styles.cancelBtnText, { color: theme.textMuted }]}>Cancelar</Text>
-              </TouchableOpacity>
+              <Text style={[styles.modalHelper, { color: theme.textMuted }]}>
+                Digite o intervalo de datas para ver o extrato completo correspondente.
+              </Text>
 
-              <Button
-                title="Aplicar Filtro"
-                onPress={handleApplyCustomDates}
-                style={{ flex: 1, marginLeft: 10 }}
+              <Text style={[styles.inputLabel, { color: theme.textMuted }]}>
+                Data Inicial (DD/MM/AAAA)
+              </Text>
+              <TextInput
+                style={[
+                  styles.dateInput,
+                  {
+                    backgroundColor: theme.surfaceVariant,
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="01/01/2026"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                maxLength={10}
+                value={inputStartDate}
+                onChangeText={(val) => setInputStartDate(applyDateMask(val))}
               />
+
+              <Text style={[styles.inputLabel, { color: theme.textMuted, marginTop: 12 }]}>
+                Data Final (DD/MM/AAAA)
+              </Text>
+              <TextInput
+                style={[
+                  styles.dateInput,
+                  {
+                    backgroundColor: theme.surfaceVariant,
+                    color: theme.text,
+                    borderColor: theme.border,
+                  },
+                ]}
+                placeholder="31/12/2026"
+                placeholderTextColor={theme.textMuted}
+                keyboardType="numeric"
+                maxLength={10}
+                value={inputEndDate}
+                onChangeText={(val) => setInputEndDate(applyDateMask(val))}
+              />
+
+              {dateError ? (
+                <View style={styles.errorBox}>
+                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
+                  <Text style={[styles.errorText, { color: theme.danger }]}>{dateError}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.modalActions}>
+                <TouchableOpacity
+                  style={[styles.cancelBtn, { borderColor: theme.border }]}
+                  onPress={() => setCustomModalVisible(false)}
+                >
+                  <Text style={[styles.cancelBtnText, { color: theme.textMuted }]}>Cancelar</Text>
+                </TouchableOpacity>
+
+                <Button
+                  title="Aplicar Filtro"
+                  onPress={handleApplyCustomDates}
+                  style={{ flex: 1, marginLeft: 10 }}
+                />
+              </View>
             </View>
-          </View>
-        </View>
+          </ScrollView>
+        </KeyboardAvoidingView>
       </Modal>
     </View>
   );
@@ -784,8 +802,12 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.55)',
     justifyContent: 'center',
-    alignItems: 'center',
     padding: 20,
+  },
+  scrollModalContent: {
+    flexGrow: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   modalCard: {
     width: '100%',
