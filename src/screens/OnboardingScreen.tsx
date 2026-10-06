@@ -6,9 +6,9 @@ import {
   Dimensions,
   FlatList,
   TouchableOpacity,
-  SafeAreaView,
   ScrollView,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../core/theme/ThemeContext';
 import { Button } from '../core/components/Button';
@@ -234,6 +234,7 @@ interface OnboardingScreenProps {
 
 export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) => {
   const { theme } = useTheme();
+  const insets = useSafeAreaInsets();
   const [currentIndex, setCurrentIndex] = useState(0);
   const flatListRef = useRef<FlatList>(null);
 
@@ -257,9 +258,16 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
   };
 
   return (
-    <SafeAreaView style={[styles.container, { backgroundColor: theme.background }]}>
-      {/* Top Bar with Skip */}
-      <View style={styles.topBar}>
+    <View style={[styles.container, { backgroundColor: theme.background }]}>
+      {/* Top Bar with Skip - with safe status bar inset */}
+      <View
+        style={[
+          styles.topBar,
+          {
+            paddingTop: Math.max(insets.top + 8, 20),
+          },
+        ]}
+      >
         <View style={styles.logoRow}>
           <View style={[styles.logoBadge, { backgroundColor: theme.primaryLight }]}>
             <Ionicons name="wallet" size={16} color={theme.primary} />
@@ -361,7 +369,15 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
       />
 
       {/* Footer Navigation Area */}
-      <View style={[styles.footerArea, { borderTopColor: theme.border }]}>
+      <View
+        style={[
+          styles.footerArea,
+          {
+            borderTopColor: theme.border,
+            paddingBottom: Math.max(insets.bottom + 12, 20),
+          },
+        ]}
+      >
         {/* Pagination Dots */}
         <View style={styles.dotsRow}>
           {SLIDES.map((_, i) => (
@@ -397,7 +413,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
           style={styles.mainBtn}
         />
       </View>
-    </SafeAreaView>
+    </View>
   );
 };
 
@@ -410,7 +426,6 @@ const styles = StyleSheet.create({
     justifyContent: 'space-between',
     alignItems: 'center',
     paddingHorizontal: 20,
-    paddingTop: 12,
     paddingBottom: 8,
   },
   logoRow: {

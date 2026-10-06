@@ -8,7 +8,9 @@ import {
   Alert,
   TouchableOpacity,
   Modal,
+  ActivityIndicator,
 } from 'react-native';
+import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../core/theme/ThemeContext';
 import { useAuth } from '../services/auth/AuthContext';
@@ -18,6 +20,7 @@ import { ExportService } from '../services/reports/ExportService';
 import { useFinance } from '../modules/FinanceContext';
 import { getMonthLabel } from '../core/utils/date';
 import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
+import { APP_VERSION_CONFIG, getAppVersionString } from '../core/version';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
 import { Badge } from '../core/components/Badge';
@@ -33,89 +36,237 @@ interface SettingsScreenProps {
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWorkspaces }) => {
   const { theme, isDark, toggleTheme } = useTheme();
   const { user, signOut, deleteAccount, updatePassword } = useAuth();
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
   const { transactions, selectedMonth, selectedYear, reloadAll } = useFinance();
 
   const [isSyncing, setIsSyncing] = useState(false);
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showTutorialModal, setShowTutorialModal] = useState(false);
 
-  // Alterar Senha Modal
+  // Modal para Alterar Senha
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordLoading, setPasswordLoading] = useState(false);
   const [passwordError, setPasswordError] = useState('');
 
+  // Modal para Transferência de Propriedade de Espaço ao Excluir Conta
+  const [showTransferModal, setShowTransferModal] = useState(false);
+  const [pendingWsToTransfer, setPendingWsToTransfer] = useState<{
+    workspaceId: string;
+    workspaceName: string;
+    members: { name: string; email: string }[];
+  } | null>(null);
+  const [selectedNewOwnerEmail, setSelectedNewOwnerEmail] = useState('');
+
   const handleUpdatePassword = async () => {
-    if (!newPassword.trim()) {
-      setPasswordError('Digite sua nova senha.');
-      return;
-    }
-    if (newPassword.length < 6) {
-      setPasswordError('A senha deve ter pelo menos 6 caracteres.');
+    if (!newPassword || newPassword.length < 6) {
+      setPasswordError('A nova senha deve ter no mínimo 6 caracteres.');
       return;
     }
     if (newPassword !== confirmPassword) {
-      setPasswordError('As senhas digitadas não coincidem.');
+      setPasswordError('As senhas não coincidem.');
       return;
     }
-    setPasswordError('');
-    setPasswordLoading(true);
-    const res = await updatePassword(newPassword);
-    setPasswordLoading(false);
-    if (!res.success) {
-      setPasswordError(res.error || 'Erro ao atualizar senha.');
-    } else {
-      setShowPasswordModal(false);
-      Alert.alert('Senha Atualizada! 🔒', 'Sua nova senha foi cadastrada com sucesso.');
+
+    try {
+      setPasswordLoading(true);
+      setPasswordError('');
+      const res = await updatePassword(newPassword);
+      if (res.success) {
+        setShowPasswordModal(false);
+        setNewPassword('');
+        setConfirmPassword('');
+        Alert.alert('Sucesso', 'Sua senha foi alterada com sucesso!');
+      } else {
+        setPasswordError(res.error || 'Não foi possível alterar a senha.');
+      }
+    } catch {
+      setPasswordError('Erro ao atualizar senha.');
+    } finally {
+      setPasswordLoading(false);
     }
   };
 
   const handleManualSync = async () => {
-    setIsSyncing(true);
-    setStatusMessage('Sincronizando com a nuvem...');
-    
-    // First push local changes up, then pull latest changes down
-    const pushRes = await CloudSyncService.syncLocalToCloud();
-    const pullRes = await CloudSyncService.syncCloudToLocal();
-    await reloadAll();
-
-    setIsSyncing(false);
-    if (pushRes.success && pullRes.success) {
-      setStatusMessage('✅ Sincronização concluída com sucesso!');
-    } else {
-      setStatusMessage('⚠️ ' + (pushRes.message || pullRes.message));
+    if (!user) {
+      Alert.alert('Modo Offline', 'Faça login para sincronizar seus dados com a nuvem.');
+      return;
+    }
+    try {
+      setIsSyncing(true);
+      setStatusMessage('Sincronizando com a nuvem...');
+      await reloadAll();
+      Alert.alert('Sincronização', 'Dados sincronizados com sucesso!');
+    } catch {
+      Alert.alert('Erro', 'Falha ao sincronizar dados.');
+    } finally {
+      setIsSyncing(false);
+      setStatusMessage('');
     }
   };
 
   const handleExportCSV = async () => {
-    const monthLabel = getMonthLabel(selectedMonth, selectedYear);
-    const ok = await ExportService.exportTransactionsToCSV(transactions, monthLabel);
-    if (!ok) {
-      Alert.alert('Exportação', 'Não foi possível gerar ou compartilhar o arquivo.');
+    try {
+      setStatusMessage('Exportando arquivo CSV...');
+      const monthLabel = getMonthLabel(selectedMonth, selectedYear);
+      const success = await ExportService.exportTransactionsToCSV(transactions, monthLabel);
+      if (success) {
+        Alert.alert('Sucesso', 'Relatório CSV exportado e compartilhado com sucesso!');
+      } else {
+        Alert.alert('Aviso', 'Não foi possível compartilhar o arquivo no momento.');
+      }
+    } catch {
+      Alert.alert('Erro', 'Não foi possível exportar os dados.');
+    } finally {
+      setStatusMessage('');
+    }
+  };
+
+  // Verificação e Download de Atualizações Online (OTA Updates)
+  const handleCheckForUpdates = async () => {
+    try {
+      setIsCheckingUpdate(true);
+      setStatusMessage('Buscando atualizações...');
+
+      // Verifica se o expo-updates está habilitado no ambiente (build nativo/APK)
+      if (!Updates.isEnabled) {
+        Alert.alert(
+          'Modo de Desenvolvimento',
+          'O serviço de atualizações online (OTA) só funciona no APK instalado no aparelho.'
+        );
+        return;
+      }
+
+      const update = await Updates.checkForUpdateAsync();
+
+      if (update.isAvailable) {
+        Alert.alert(
+          'Nova Atualização Disponível! 🎉',
+          'Encontramos uma nova versão com melhorias e correções. Deseja atualizar agora?',
+          [
+            { text: 'Mais Tarde', style: 'cancel' },
+            {
+              text: 'Atualizar Agora',
+              onPress: async () => {
+                try {
+                  setStatusMessage('Baixando arquivos da atualização...');
+                  await Updates.fetchUpdateAsync();
+                  Alert.alert(
+                    'Atualização Concluída! 🚀',
+                    'A nova versão foi instalada com sucesso. O aplicativo será reiniciado para aplicar as novidades.',
+                    [
+                      {
+                        text: 'Reiniciar Agora',
+                        onPress: async () => {
+                          await Updates.reloadAsync();
+                        },
+                      },
+                    ]
+                  );
+                } catch (downloadErr: any) {
+                  Alert.alert(
+                    'Falha no Download',
+                    `Não foi possível baixar os arquivos da nova versão:\n${downloadErr?.message || 'Verifique sua conexão com a internet.'}`
+                  );
+                } finally {
+                  setStatusMessage('');
+                }
+              },
+            },
+          ]
+        );
+      } else {
+        Alert.alert(
+          'Aplicativo em Dia! ✨',
+          `Você já está utilizando a versão mais recente (${getAppVersionString()}). Nenhuma atualização pendente.`
+        );
+      }
+    } catch (err: any) {
+      const msg = err?.message || '';
+      if (msg.includes('network') || msg.includes('Failed to fetch') || msg.includes('connection')) {
+        Alert.alert(
+          'Sem Conexão',
+          'Não foi possível conectar ao servidor de atualizações. Verifique se o seu celular está conectado à internet (Wi-Fi ou 4G/5G).'
+        );
+      } else {
+        Alert.alert(
+          'Falha na Verificação',
+          `Não foi possível checar atualizações no momento:\n${msg || 'Tente novamente em instantes.'}`
+        );
+      }
+    } finally {
+      setIsCheckingUpdate(false);
+      setStatusMessage('');
+    }
+  };
+
+  // Execução final da exclusão de conta
+  const executeFinalAccountDeletion = async () => {
+    try {
+      setStatusMessage('Excluindo conta e dados...');
+      const res = await deleteAccount();
+      if (res.success) {
+        Alert.alert('Conta Excluída', 'Sua conta e seus dados foram removidos com sucesso.');
+      } else {
+        Alert.alert('Aviso', res.error || 'Não foi possível excluir a conta.');
+      }
+    } catch {
+      Alert.alert('Erro', 'Ocorreu um erro ao excluir a conta.');
     }
   };
 
   const handleDeleteAccount = () => {
+    if (!user) return;
+
+    // 1. Identifica espaços compartilhados onde o usuário atual é o PROPRIETÁRIO (owner)
+    const userEmail = user.email?.toLowerCase().trim();
+    const ownedSharedWorkspaces = workspaces.filter((ws) => {
+      if (ws.id === 'ws-solo' || ws.type === 'solo') return false;
+      const myMembership = ws.members.find(
+        (m) => m.isCurrentUser || m.email?.toLowerCase().trim() === userEmail
+      );
+      return myMembership?.role === 'owner';
+    });
+
+    // 2. Verifica se algum desses espaços possui OUTROS membros além do usuário
+    const wsWithOtherMembers = ownedSharedWorkspaces.find((ws) => {
+      const otherMembers = ws.members.filter(
+        (m) => !m.isCurrentUser && m.email?.toLowerCase().trim() !== userEmail
+      );
+      return otherMembers.length > 0;
+    });
+
+    // CENÁRIO A: É dono de um espaço compartilhado e TEM outros participantes
+    if (wsWithOtherMembers) {
+      const otherMembers = wsWithOtherMembers.members.filter(
+        (m) => !m.isCurrentUser && m.email?.toLowerCase().trim() !== userEmail
+      );
+
+      setPendingWsToTransfer({
+        workspaceId: wsWithOtherMembers.id,
+        workspaceName: wsWithOtherMembers.name,
+        members: otherMembers.map((m) => ({ name: m.name, email: m.email })),
+      });
+      setSelectedNewOwnerEmail(otherMembers[0].email);
+      setShowTransferModal(true);
+      return;
+    }
+
+    // CENÁRIO B: Não tem outros participantes em espaços compartilhados (está sozinho)
+    // Nenhuma pergunta desnecessária sobre transferência: apaga direto!
     Alert.alert(
       'Excluir Minha Conta?',
-      'ATENÇÃO: Ao excluir sua conta:\n\n• Todos os seus dados na nuvem serão apagados.\n• Seus acessos aos espaços compartilhados serão revogados.\n• O aplicativo será desconectado e limpo.\n\nEsta ação NÃO pode ser desfeita. Tem certeza que deseja excluir sua conta definitivamente?',
+      'ATENÇÃO: Ao excluir sua conta:\n\n• Todos os seus dados, lançamentos e espaços na nuvem serão apagados definitivamente.\n• O aplicativo será desconectado e limpo.\n\nEsta ação NÃO pode ser desfeita. Tem certeza que deseja excluir sua conta definitivamente?',
       [
         { text: 'Cancelar', style: 'cancel' },
         {
           text: 'Excluir Definitivamente',
           style: 'destructive',
-          onPress: async () => {
-            const res = await deleteAccount();
-            if (res.success) {
-              Alert.alert('Conta Excluída', 'Sua conta e seus dados foram removidos com sucesso.');
-            } else {
-              Alert.alert('Aviso', res.error || 'Não foi possível excluir a conta.');
-            }
-          },
+          onPress: executeFinalAccountDeletion,
         },
       ]
     );
@@ -404,7 +555,34 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
 
           <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
 
-          {/* App Version */}
+          {/* App Version & Atualizações */}
+          <TouchableOpacity
+            style={styles.cell}
+            activeOpacity={0.7}
+            onPress={handleCheckForUpdates}
+            disabled={isCheckingUpdate}
+          >
+            <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}20` }]}>
+              {isCheckingUpdate ? (
+                <ActivityIndicator size="small" color={theme.primary} />
+              ) : (
+                <Ionicons name="cloud-download-outline" size={20} color={theme.primary} />
+              )}
+            </View>
+            <View style={styles.cellTextWrap}>
+              <Text style={[styles.cellTitle, { color: theme.text }]}>
+                Verificar Atualizações
+              </Text>
+              <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                {isCheckingUpdate ? 'Consultando versão online...' : 'Buscar novidades na nuvem'}
+              </Text>
+            </View>
+            <Ionicons name="refresh" size={18} color={theme.textMuted} />
+          </TouchableOpacity>
+
+          <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
+
+          {/* App Info */}
           <View style={styles.cell}>
             <View style={[styles.cellIconWrap, { backgroundColor: theme.surfaceVariant }]}>
               <Ionicons name="phone-portrait-outline" size={20} color={theme.textMuted} />
@@ -414,10 +592,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 Finanças Pessoais
               </Text>
               <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
-                Versão 1.2.0 • Android
+                {getAppVersionString()} • {APP_VERSION_CONFIG.platform}
               </Text>
             </View>
-            <Badge label="Atualizado" variant="neutral" />
+            <Badge label={`v${APP_VERSION_CONFIG.version}`} variant="primary" />
           </View>
         </Card>
 
@@ -549,6 +727,142 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 loading={passwordLoading}
                 onPress={handleUpdatePassword}
                 style={{ flex: 1 }}
+              />
+            </View>
+          </View>
+        </TouchableOpacity>
+      </Modal>
+
+      {/* Modal de Transferência de Propriedade do Espaço */}
+      <Modal
+        visible={showTransferModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setShowTransferModal(false)}
+      >
+        <TouchableOpacity
+          style={styles.modalOverlay}
+          activeOpacity={1}
+          onPress={() => setShowTransferModal(false)}
+        >
+          <View
+            style={[
+              styles.passwordModalCard,
+              { backgroundColor: theme.surface, borderColor: theme.border },
+            ]}
+          >
+            <View style={styles.passwordModalHeader}>
+              <View style={{ flex: 1 }}>
+                <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
+                  Transferir Espaço 👥
+                </Text>
+                <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
+                  Você é proprietário de "{pendingWsToTransfer?.workspaceName}". Deseja transferir a posse para outro membro antes de sair?
+                </Text>
+              </View>
+              <TouchableOpacity
+                onPress={() => setShowTransferModal(false)}
+                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+              >
+                <Ionicons name="close" size={22} color={theme.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, marginBottom: 8 }}>
+              Escolha o novo proprietário:
+            </Text>
+
+            <ScrollView style={{ maxHeight: 180, marginBottom: 14 }}>
+              {pendingWsToTransfer?.members.map((m) => {
+                const isSelected = selectedNewOwnerEmail === m.email;
+                return (
+                  <TouchableOpacity
+                    key={m.email}
+                    onPress={() => setSelectedNewOwnerEmail(m.email)}
+                    style={{
+                      flexDirection: 'row',
+                      alignItems: 'center',
+                      padding: 12,
+                      borderRadius: 10,
+                      borderWidth: 1,
+                      borderColor: isSelected ? theme.primary : theme.border,
+                      backgroundColor: isSelected ? `${theme.primary}15` : theme.background,
+                      marginBottom: 8,
+                    }}
+                  >
+                    <Ionicons
+                      name={isSelected ? 'radio-button-on' : 'radio-button-off'}
+                      size={20}
+                      color={isSelected ? theme.primary : theme.textMuted}
+                      style={{ marginRight: 10 }}
+                    />
+                    <View style={{ flex: 1 }}>
+                      <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
+                        {m.name || m.email}
+                      </Text>
+                      <Text style={{ fontSize: 12, color: theme.textMuted }}>
+                        {m.email}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+
+            <View style={{ gap: 8 }}>
+              <Button
+                title="Transferir e Excluir Minha Conta"
+                variant="primary"
+                onPress={async () => {
+                  if (!pendingWsToTransfer || !selectedNewOwnerEmail) return;
+                  setShowTransferModal(false);
+                  try {
+                    setStatusMessage('Transferindo propriedade...');
+                    await transferOwnership(pendingWsToTransfer.workspaceId, selectedNewOwnerEmail);
+                    await executeFinalAccountDeletion();
+                  } catch {
+                    Alert.alert('Erro', 'Falha ao transferir propriedade.');
+                  } finally {
+                    setStatusMessage('');
+                  }
+                }}
+              />
+
+              <Button
+                title="Excluir Espaço Junto"
+                variant="danger"
+                onPress={() => {
+                  Alert.alert(
+                    'Excluir Espaço e Dados',
+                    `Tem certeza que deseja apagar o espaço "${pendingWsToTransfer?.workspaceName}" e todos os seus lançamentos? Os outros membros perderão o acesso.`,
+                    [
+                      { text: 'Cancelar', style: 'cancel' },
+                      {
+                        text: 'Sim, Excluir Tudo',
+                        style: 'destructive',
+                        onPress: async () => {
+                          if (!pendingWsToTransfer) return;
+                          setShowTransferModal(false);
+                          try {
+                            setStatusMessage('Excluindo espaço...');
+                            await deleteWorkspace(pendingWsToTransfer.workspaceId);
+                            await executeFinalAccountDeletion();
+                          } catch {
+                            Alert.alert('Erro', 'Falha ao excluir espaço.');
+                          } finally {
+                            setStatusMessage('');
+                          }
+                        },
+                      },
+                    ]
+                  );
+                }}
+              />
+
+              <Button
+                title="Cancelar"
+                variant="outline"
+                onPress={() => setShowTransferModal(false)}
               />
             </View>
           </View>

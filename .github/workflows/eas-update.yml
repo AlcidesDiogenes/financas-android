@@ -1,0 +1,32 @@
+name: Publicar Atualizacao Automatica OTA
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  update:
+    name: EAS Update (Nuvem)
+    runs-on: ubuntu-latest
+    steps:
+      - name: 1. Baixar codigo do repositorio
+        uses: actions/checkout@v4
+
+      - name: 2. Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 3. Configurar EAS CLI
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: 4. Instalar dependencias
+        run: npm ci
+
+      - name: 5. Publicar atualizacao online para os aplicativos
+        run: npx eas update --auto --non-interactive

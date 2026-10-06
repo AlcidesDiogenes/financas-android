@@ -2,8 +2,9 @@
   "expo": {
     "name": "Finanças",
     "slug": "financas-app",
+    "privacy": "hidden",
     "scheme": "financas",
-    "version": "1.0.0",
+    "version": "1.3.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "light",
@@ -12,6 +13,7 @@
     },
     "android": {
       "package": "com.alcides.financas",
+      "versionCode": 2,
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -30,6 +32,13 @@
       "eas": {
         "projectId": "ed933f40-3343-460d-891e-f440b4f504b8"
       }
+    },
+    "runtimeVersion": {
+      "policy": "sdkVersion"
+    },
+    "updates": {
+      "url": "https://u.expo.dev/ed933f40-3343-460d-891e-f440b4f504b8",
+      "checkAutomatically": "ON_LOAD"
     }
   }
 }

@@ -18,11 +18,12 @@ echo  [5] Enviar Alteracoes para o GitHub (Apenas quando voce quiser)
 echo  [6] Reinstalar / Atualizar Dependencias (npm install)
 echo  [7] Verificar Login no Expo (EAS Build)
 echo  [8] Testar Conexao com Supabase (Banco de Dados)
+echo  [9] Publicar Atualizacao Online (Envia mudancas para o APK sem reinstalar)
 echo  [0] Sair
 echo.
 echo ==============================================================================
 set "OPCAO="
-set /p OPCAO="Escolha uma opcao [0-8]: "
+set /p OPCAO="Escolha uma opcao [0-9]: "
 
 if "%OPCAO%"=="1" goto INICIAR_APP
 if "%OPCAO%"=="2" goto INICIAR_CACHE
@@ -32,6 +33,7 @@ if "%OPCAO%"=="5" goto PUSH_GITHUB
 if "%OPCAO%"=="6" goto INSTALAR_DEPS
 if "%OPCAO%"=="7" goto EAS_STATUS
 if "%OPCAO%"=="8" goto TESTAR_SUPABASE
+if "%OPCAO%"=="9" goto PUBLICAR_EXPO
 if "%OPCAO%"=="0" goto SAIR
 
 echo.
@@ -73,18 +75,48 @@ goto MENU
 :GERAR_APK
 cls
 echo ==============================================================================
-echo                       GERADOR DE APK (EAS BUILD NA NUVEM)
+echo                              GERADOR DE APK
 echo ==============================================================================
-echo [INFO] O build sera feito na nuvem da Expo sem gastar memoria do seu PC.
 echo.
-set /p CONFIRMA="Deseja iniciar a geracao do APK agora? (S/N): "
-if /i not "%CONFIRMA%"=="S" goto MENU
-
+echo  [1] Compilar no Computador (Super Rapido, direto na sua maquina)
+echo  [2] Disparar build na Nuvem (EAS Build com link para celular)
+echo  [3] Voltar ao Menu
 echo.
-echo [INFO] Enviando projeto para a nuvem da Expo...
-call npx eas build -p android --profile preview
-echo.
-pause
+set /p TIPO_BUILD="Escolha uma opcao [1-3]: "
+if "%TIPO_BUILD%"=="1" (
+    echo.
+    echo [INFO] Sincronizando codigo com a pasta de build...
+    robocopy "%~dp0." "C:\Financas" /E /XD node_modules .git .cxx build /NFL /NDL /NJH /NJS > nul
+    echo [INFO] Compilando APK localmente com o Gradle...
+    cd /d "C:\Financas\android"
+    call gradlew assembleRelease
+    if exist "C:\Financas\android\app\build\outputs\apk\release\app-release.apk" (
+        copy /Y "C:\Financas\android\app\build\outputs\apk\release\app-release.apk" "%USERPROFILE%\Desktop\Financas_App.apk" > nul
+        echo.
+        echo ==============================================================================
+        echo [SUCESSO] APK compilado com sucesso!
+        echo Arquivo salvo na sua Area de Trabalho: Financas_App.apk
+        echo ==============================================================================
+    ) else (
+        echo.
+        echo [ERRO] Falha ao gerar o arquivo APK.
+    )
+    cd /d "%~dp0"
+    echo.
+    pause
+    goto MENU
+)
+if "%TIPO_BUILD%"=="2" (
+    echo.
+    echo [INFO] Enviando pedido de compilacao para a nuvem da Expo...
+    call npx eas build -p android --profile preview --no-wait
+    echo.
+    echo [SUCESSO] Build iniciado na nuvem! Voce ja pode fechar o terminal se quiser.
+    echo Acompanhe ou baixe o APK em: https://expo.dev
+    echo.
+    pause
+    goto MENU
+)
 goto MENU
 
 :PUSH_GITHUB
@@ -145,6 +177,26 @@ cls
 echo [INFO] Testando conexao com Supabase...
 echo.
 node -e "const { createClient } = require('@supabase/supabase-js'); const c = createClient('https://uxflydckwwegjocrgbnl.supabase.co', 'sb_publishable_50BZoDF0Zswkz45RoMFKwg_AVORtMXE'); c.from('workspaces').select('id').limit(1).then(r => { if(r.error) { console.log('Erro:', r.error.message); } else { console.log('Conexao OK com Supabase! Status 200.'); } }).catch(e => console.log('Falha:', e));"
+echo.
+pause
+goto MENU
+
+:PUBLICAR_EXPO
+cls
+echo ==============================================================================
+echo              PUBLICANDO ATUALIZACAO ONLINE (OTA UPDATE)
+echo ==============================================================================
+echo.
+echo [INFO] Enviando as alteracoes para a nuvem da Expo...
+echo [INFO] Todos os celulares com o app instalado receberao a atualizacao automaticamente!
+echo.
+call npx eas update --auto
+echo.
+echo ==============================================================================
+echo [SUCESSO] Atualizacao enviada com sucesso!
+echo.
+echo Os celulares com o app instalado atualizarao sozinhos ao abrir!
+echo ==============================================================================
 echo.
 pause
 goto MENU

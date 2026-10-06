@@ -334,7 +334,18 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const client = await SupabaseService.getClient();
 
-      // 1. Chama a função segura no Supabase para deletar o usuário do auth.users e suas tabelas
+      // 1. Apaga também explicitamente todos os registros do workspace pessoal no Supabase
+      try {
+        await Promise.all([
+          client.from('transactions').delete().eq('workspace_id', 'ws-solo'),
+          client.from('recurrings').delete().eq('workspace_id', 'ws-solo'),
+          client.from('recurring_month_records').delete().eq('workspace_id', 'ws-solo'),
+          client.from('budgets').delete().eq('workspace_id', 'ws-solo'),
+          client.from('goals').delete().eq('workspace_id', 'ws-solo'),
+        ]);
+      } catch {}
+
+      // 2. Chama a função segura no Supabase para deletar o usuário do auth.users e suas tabelas
       try {
         await client.rpc('delete_user_account');
       } catch (rpcErr) {

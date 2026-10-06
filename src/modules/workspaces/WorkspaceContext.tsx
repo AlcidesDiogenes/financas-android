@@ -13,6 +13,7 @@ interface WorkspaceContextType {
   updateMemberRole: (workspaceId: string, memberId: string, role: WorkspaceRole) => Promise<void>;
   removeMember: (workspaceId: string, memberId: string) => Promise<void>;
   renameWorkspace: (workspaceId: string, newName: string) => Promise<void>;
+  transferOwnership: (workspaceId: string, newOwnerEmail: string) => Promise<{ success: boolean; message: string }>;
   deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; message: string }>;
   joinWorkspaceByCode: (inviteCode: string) => Promise<{ success: boolean; message: string }>;
   currentUserRole: WorkspaceRole;
@@ -53,18 +54,28 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
         if (memberRows && memberRows.length > 0) {
           const workspaceIds = memberRows.map((m) => m.workspace_id);
-          const { data: remoteWorkspaces } = await client
-            .from('workspaces')
-            .select('*')
-            .in('id', workspaceIds);
+          const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
+            client.from('workspaces').select('*').in('id', workspaceIds),
+            client.from('workspace_members').select('*').in('workspace_id', workspaceIds),
+          ]);
+
+          const remoteWorkspaces = remoteWorkspacesRes.data;
+          const allMembers = allMembersRes.data || [];
 
           if (remoteWorkspaces) {
             remoteWorkspaces.forEach((rw) => {
               const alreadyHas = list.some((w) => w.id === rw.id);
-              if (!alreadyHas) {
-                const memberInfo = memberRows.find((m) => m.workspace_id === rw.id);
-                const role: WorkspaceRole = (memberInfo?.role as WorkspaceRole) || 'editor';
+              const wsMembersFromCloud: WorkspaceMember[] = allMembers
+                .filter((m) => m.workspace_id === rw.id)
+                .map((m) => ({
+                  id: m.id,
+                  name: m.name,
+                  email: m.email,
+                  role: m.role as WorkspaceRole,
+                  isCurrentUser: m.email?.toLowerCase().trim() === user.email?.toLowerCase().trim(),
+                }));
 
+              if (!alreadyHas) {
                 list.push({
                   id: rw.id,
                   name: rw.name,
@@ -72,16 +83,25 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                   type: rw.type as any,
                   inviteCode: rw.invite_code || '',
                   createdAt: rw.created_at,
-                  members: [
+                  members: wsMembersFromCloud.length > 0 ? wsMembersFromCloud : [
                     {
                       id: `member-${user.id}`,
                       name: user.name || 'Você',
                       email: user.email,
-                      role,
+                      role: 'owner',
                       isCurrentUser: true,
                     },
                   ],
                 });
+              } else {
+                // Atualiza lista de membros do espaço já existente
+                const existingIdx = list.findIndex((w) => w.id === rw.id);
+                if (existingIdx >= 0 && wsMembersFromCloud.length > 0) {
+                  list[existingIdx] = {
+                    ...list[existingIdx],
+                    members: wsMembersFromCloud,
+                  };
+                }
               }
             });
             await WorkspaceRepository.saveWorkspaces(list);
@@ -280,6 +300,66 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     } catch {}
   };
 
+  const transferOwnership = async (
+    workspaceId: string,
+    newOwnerEmail: string
+  ): Promise<{ success: boolean; message: string }> => {
+    const cleanEmail = newOwnerEmail.trim().toLowerCase();
+    const targetWs = workspaces.find((w) => w.id === workspaceId);
+    if (!targetWs) {
+      return { success: false, message: 'Espaço não encontrado.' };
+    }
+
+    const newOwnerMember = targetWs.members.find(
+      (m) => m.email.toLowerCase().trim() === cleanEmail
+    );
+    if (!newOwnerMember) {
+      return { success: false, message: 'O novo proprietário deve ser membro do espaço.' };
+    }
+
+    const updated = workspaces.map((w) => {
+      if (w.id === workspaceId) {
+        return {
+          ...w,
+          members: w.members.map((m) => {
+            if (m.email.toLowerCase().trim() === cleanEmail) {
+              return { ...m, role: 'owner' as WorkspaceRole };
+            }
+            if (m.role === 'owner') {
+              return { ...m, role: 'editor' as WorkspaceRole };
+            }
+            return m;
+          }),
+        };
+      }
+      return w;
+    });
+
+    setWorkspaces(updated);
+    await WorkspaceRepository.saveWorkspaces(updated);
+
+    try {
+      const client = await SupabaseService.getClient();
+      // Atualiza o novo dono
+      await client
+        .from('workspace_members')
+        .update({ role: 'owner' })
+        .eq('workspace_id', workspaceId)
+        .eq('email', cleanEmail);
+
+      // Rebaixa o antigo dono para editor
+      if (user?.email) {
+        await client
+          .from('workspace_members')
+          .update({ role: 'editor' })
+          .eq('workspace_id', workspaceId)
+          .eq('email', user.email.toLowerCase().trim());
+      }
+    } catch {}
+
+    return { success: true, message: `Propriedade transferida com sucesso para ${newOwnerMember.name}!` };
+  };
+
   const deleteWorkspace = async (
     workspaceId: string
   ): Promise<{ success: boolean; message: string }> => {
@@ -309,11 +389,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     try {
       const client = await SupabaseService.getClient();
-      await client.from('workspace_members').delete().eq('workspace_id', workspaceId);
-      await client.from('workspaces').delete().eq('id', workspaceId);
+      // Exclui todos os dados associados a este espaço compartilhado no Supabase
+      await Promise.all([
+        client.from('transactions').delete().eq('workspace_id', workspaceId),
+        client.from('recurrings').delete().eq('workspace_id', workspaceId),
+        client.from('recurring_month_records').delete().eq('workspace_id', workspaceId),
+        client.from('budgets').delete().eq('workspace_id', workspaceId),
+        client.from('goals').delete().eq('workspace_id', workspaceId),
+        client.from('workspace_members').delete().eq('workspace_id', workspaceId),
+        client.from('workspaces').delete().eq('id', workspaceId),
+      ]);
     } catch {}
 
-    return { success: true, message: 'Espaço excluído com sucesso.' };
+    return { success: true, message: 'Espaço e todos os seus dados foram excluídos com sucesso.' };
   };
 
   const joinWorkspaceByCode = async (
@@ -394,6 +482,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         updateMemberRole,
         removeMember,
         renameWorkspace,
+        transferOwnership,
         deleteWorkspace,
         joinWorkspaceByCode,
         currentUserRole,

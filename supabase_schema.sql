@@ -159,18 +159,22 @@ BEGIN
     -- Obter e-mail do usuário
     SELECT email INTO user_email_val FROM auth.users WHERE id = current_uid;
 
-    -- 1. Excluir dados do workspace solo deste usuário (ws-<uid>)
-    DELETE FROM public.transactions WHERE workspace_id = 'ws-' || current_uid::text;
-    DELETE FROM public.recurrings WHERE workspace_id = 'ws-' || current_uid::text;
-    DELETE FROM public.recurring_month_records WHERE workspace_id = 'ws-' || current_uid::text;
-    DELETE FROM public.budgets WHERE workspace_id = 'ws-' || current_uid::text;
-    DELETE FROM public.goals WHERE workspace_id = 'ws-' || current_uid::text;
-    DELETE FROM public.workspaces WHERE id = 'ws-' || current_uid::text;
+    -- 1. Excluir dados do workspace solo deste usuário (ws-<uid> e ws-solo)
+    DELETE FROM public.transactions WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
+    DELETE FROM public.recurrings WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
+    DELETE FROM public.recurring_month_records WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
+    DELETE FROM public.budgets WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
+    DELETE FROM public.goals WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
+    DELETE FROM public.workspaces WHERE id IN ('ws-' || current_uid::text, 'ws-solo');
 
     -- 2. Remover associações de membros em workspaces compartilhados
     IF user_email_val IS NOT NULL THEN
         DELETE FROM public.workspace_members WHERE LOWER(email) = LOWER(user_email_val);
     END IF;
+
+    -- 2.1 Excluir workspaces que ficaram sem nenhum membro restante
+    DELETE FROM public.workspaces 
+    WHERE id NOT IN (SELECT DISTINCT workspace_id FROM public.workspace_members);
 
     -- 3. Excluir o usuário definitivamente da tabela auth.users do Supabase
     DELETE FROM auth.users WHERE id = current_uid;
