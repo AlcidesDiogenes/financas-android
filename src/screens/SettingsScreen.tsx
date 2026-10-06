@@ -141,6 +141,23 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         return;
       }
 
+      console.log('Updates info:', {
+        channel: Updates.channel,
+        runtimeVersion: Updates.runtimeVersion,
+        updateId: Updates.updateId,
+      });
+
+      // Garante que o cabeçalho do canal seja enviado para o servidor EAS
+      try {
+        if (typeof Updates.setUpdateRequestHeadersOverride === 'function') {
+          Updates.setUpdateRequestHeadersOverride({
+            'expo-channel-name': 'production',
+          });
+        }
+      } catch (headerErr) {
+        console.warn('Erro ao definir cabeçalhos de atualização:', headerErr);
+      }
+
       const update = await Updates.checkForUpdateAsync();
 
       if (update.isAvailable) {
@@ -195,7 +212,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       } else {
         Alert.alert(
           'Falha na Verificação',
-          `Não foi possível checar atualizações no momento:\n${msg || 'Tente novamente em instantes.'}`
+          `Não foi possível checar atualizações no momento.\n\nDetalhes:\nCanal do App: "${Updates.channel || 'nenhum'}"\nRuntime: "${Updates.runtimeVersion || 'padrão'}"\nErro: ${msg}`
         );
       }
     } finally {

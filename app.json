@@ -38,7 +38,10 @@
     },
     "updates": {
       "url": "https://u.expo.dev/ed933f40-3343-460d-891e-f440b4f504b8",
-      "checkAutomatically": "ON_LOAD"
+      "checkAutomatically": "ON_LOAD",
+      "requestHeaders": {
+        "expo-channel-name": "production"
+      }
     }
   }
 }
