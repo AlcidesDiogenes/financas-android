@@ -9,6 +9,7 @@ import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context'
 import { useTheme } from '../core/theme/ThemeContext';
 import { useBottomBarBadge } from '../core/theme/BottomBarBadgeContext';
 import { useFinance } from '../modules/FinanceContext';
+import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
 import { isRecurringActiveInMonth } from '../modules/recurrings/types';
 import { HomeScreen } from '../screens/HomeScreen';
 import { TransactionsScreen } from '../screens/TransactionsScreen';
@@ -45,6 +46,7 @@ export const MainNavigator: React.FC = () => {
     selectedMonth,
     selectedYear,
   } = useFinance();
+  const { pendingRequestsCount } = useWorkspace();
 
   const [currentTab, setCurrentTab] = useState<TabKey>('home');
   const [previousTab, setPreviousTab] = useState<TabKey>('home');
@@ -194,6 +196,19 @@ export const MainNavigator: React.FC = () => {
                       </View>
                     ) : (
                       <View style={styles.badgeDot} />
+                    )
+                  )}
+
+                  {/* Settings / Workspaces Approval Requests Badge */}
+                  {tab.key === 'settings' && pendingRequestsCount > 0 && badgeStyle !== 'none' && (
+                    badgeStyle === 'number' ? (
+                      <View style={[styles.badgeBadge, { backgroundColor: '#F59E0B' }]}>
+                        <Text style={styles.badgeBadgeText}>
+                          {pendingRequestsCount > 9 ? '9+' : pendingRequestsCount}
+                        </Text>
+                      </View>
+                    ) : (
+                      <View style={[styles.badgeDot, { backgroundColor: '#F59E0B' }]} />
                     )
                   )}
                 </View>

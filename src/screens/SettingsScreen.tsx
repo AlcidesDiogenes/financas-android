@@ -48,7 +48,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const { badgeStyle } = useBottomBarBadge();
   const { swipePayDirection } = useSwipeAction();
   const { user, signOut, deleteAccount } = useAuth();
-  const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
+  const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace, pendingRequestsCount } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
   const { transactions, selectedMonth, selectedYear, reloadAll, balanceMode } = useFinance();
 
@@ -462,9 +462,17 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
               <Ionicons name="people" size={20} color="#8B5CF6" />
             </View>
             <View style={styles.cellTextWrap}>
-              <Text style={[styles.cellTitle, { color: theme.text }]}>
-                Espaços Financeiros
-              </Text>
+              <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6 }}>
+                <Text style={[styles.cellTitle, { color: theme.text }]}>
+                  Espaços Financeiros
+                </Text>
+                {pendingRequestsCount > 0 && (
+                  <Badge
+                    label={`${pendingRequestsCount} pendente${pendingRequestsCount > 1 ? 's' : ''}`}
+                    variant="warning"
+                  />
+                )}
+              </View>
               <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
                 Atual: {activeWorkspace.name} ({activeWorkspace.type === 'solo' ? 'Individual' : 'Compartilhado'})
               </Text>

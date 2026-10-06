@@ -40,7 +40,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
 }) => {
   const { theme, isDark, toggleTheme } = useTheme();
   const { isPrivacyMode, togglePrivacyMode, formatPrivateCurrency } = usePrivacy();
-  const { activeWorkspace, canEdit } = useWorkspace();
+  const { activeWorkspace, canEdit, pendingRequestsCount } = useWorkspace();
   const {
     monthlySummary,
     projectedIncome,
@@ -118,6 +118,11 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
               {activeWorkspace.name}
             </Text>
           </View>
+          {pendingRequestsCount > 0 && (
+            <View style={styles.wsPendingBadge}>
+              <Text style={styles.wsPendingBadgeText}>{pendingRequestsCount}</Text>
+            </View>
+          )}
           <Ionicons name="chevron-down" size={16} color={theme.textMuted} />
         </TouchableOpacity>
 
@@ -154,6 +159,33 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
       >
+        {/* Banner de Notificação: Solicitações de Entrada Pendentes */}
+        {pendingRequestsCount > 0 && (
+          <TouchableOpacity
+            style={[
+              styles.pendingBanner,
+              { backgroundColor: '#F59E0B18', borderColor: '#F59E0B44' },
+            ]}
+            onPress={onNavigateToWorkspaces}
+            activeOpacity={0.8}
+          >
+            <View style={[styles.pendingBannerIconWrap, { backgroundColor: '#F59E0B' }]}>
+              <Ionicons name="notifications" size={17} color="#FFF" />
+            </View>
+            <View style={styles.pendingBannerTextWrap}>
+              <Text style={[styles.pendingBannerTitle, { color: theme.text }]}>
+                {pendingRequestsCount === 1
+                  ? '1 Solicitação de Entrada Pendente'
+                  : `${pendingRequestsCount} Solicitações de Entrada`}
+              </Text>
+              <Text style={[styles.pendingBannerSubtitle, { color: theme.textMuted }]}>
+                Toque para aprovar ou recusar o acesso ao seu espaço
+              </Text>
+            </View>
+            <Ionicons name="chevron-forward" size={18} color="#F59E0B" />
+          </TouchableOpacity>
+        )}
+
         {/* Month Navigator */}
         <View style={styles.periodRow}>
           <PeriodSelector compact />
@@ -615,5 +647,47 @@ const styles = StyleSheet.create({
   seeAllText: {
     fontSize: 13,
     fontWeight: '700',
+  },
+  wsPendingBadge: {
+    backgroundColor: '#F59E0B',
+    borderRadius: 9,
+    minWidth: 18,
+    height: 18,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    marginRight: 4,
+  },
+  wsPendingBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
+  },
+  pendingBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 12,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 12,
+    gap: 10,
+  },
+  pendingBannerIconWrap: {
+    width: 32,
+    height: 32,
+    borderRadius: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pendingBannerTextWrap: {
+    flex: 1,
+  },
+  pendingBannerTitle: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  pendingBannerSubtitle: {
+    fontSize: 11,
+    marginTop: 2,
   },
 });
