@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { AppState } from 'react-native';
 import { Workspace, WorkspaceMember, WorkspaceRole } from './types';
 import {
@@ -92,6 +92,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [workspaces, setWorkspaces] = useState<Workspace[]>(DEFAULT_WORKSPACES);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string>(DEFAULT_WORKSPACES[0].id);
   const [defaultWorkspaceId, setDefaultWorkspaceIdState] = useState<string | null>(null);
+  const isInitializedRef = useRef(false);
 
   useEffect(() => {
     loadWorkspaces();
@@ -118,6 +119,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   }, [user?.id, user?.email]);
 
   const loadWorkspaces = async () => {
+    const isInitialBoot = !isInitializedRef.current;
+    isInitializedRef.current = true;
+
     // No modo offline, permite apenas o espaço pessoal solo
     if (!user) {
       const soloList = [createDefaultPersonalWorkspace()];
@@ -132,9 +136,10 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // 1. Assegura que o espaço pessoal do usuário autenticado é ws-${user.id} e privado
     const personalWs = createDefaultPersonalWorkspace(user.id, user.name, user.email);
 
-    // Filtra para remover qualquer 'ws-solo' genérico e qualquer outro espaço solo que não seja deste user.id
-    const sharedWorkspaces = list.filter((w) => w.type !== 'solo' && w.id !== 'ws-solo' && w.id !== personalWsId);
-    list = [personalWs, ...sharedWorkspaces];
+    // Filtra apenas o 'ws-solo' genérico legado
+    // Mantém o espaço pessoal principal E todos os outros espaços criados pelo usuário
+    const otherWorkspaces = list.filter((w) => w.id !== 'ws-solo' && w.id !== personalWsId);
+    list = [personalWs, ...otherWorkspaces];
 
     // Migra itens locais que estavam vinculados ao antigo 'ws-solo' para o personalWsId deste usuário
     await migrateLocalSoloData(personalWsId);
@@ -160,29 +165,40 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       });
     } catch {}
 
-    // 2. Busca convites em espaços compartilhados no Supabase
+    // 2. Busca convites e espaços no Supabase
     if (user?.email) {
       try {
         const client = await SupabaseService.getClient();
+        const userEmail = user.email.toLowerCase().trim();
         const { data: memberRows } = await client
           .from('workspace_members')
           .select('workspace_id, role, name, email')
-          .eq('email', user.email.toLowerCase().trim());
+          .eq('email', userEmail);
 
         if (memberRows) {
-          // Filtra apenas workspaces compartilhados aos quais este usuário realmente pertence E já foi APROVADO na nuvem
-          const sharedWsIds = memberRows
+          // Filtra espaços aos quais o usuário pertence na nuvem e já foi aprovado
+          const approvedCloudWsIds = memberRows
             .filter((m) => m.role !== 'pending')
             .map((m) => m.workspace_id)
             .filter((id) => id !== personalWsId && !id.startsWith('ws-solo'));
 
-          // Remove da lista local qualquer espaço compartilhado do qual o usuário tenha sido desvinculado ou esteja pendente
-          list = list.filter((w) => w.id === personalWsId || sharedWsIds.includes(w.id));
+          // Remove da lista local apenas espaços de TERCEIROS dos quais o usuário foi removido/rejeitado
+          // NUNCA remove espaços criados localmente pelo próprio usuário onde ele é o proprietário (owner)!
+          list = list.filter((w) => {
+            if (w.id === personalWsId) return true;
+            const isLocalOwner = w.members.some(
+              (m) =>
+                m.role === 'owner' &&
+                (m.isCurrentUser || (m.email && m.email.toLowerCase().trim() === userEmail))
+            );
+            if (isLocalOwner) return true;
+            return approvedCloudWsIds.includes(w.id);
+          });
 
-          if (sharedWsIds.length > 0) {
+          if (approvedCloudWsIds.length > 0) {
             const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
-              client.from('workspaces').select('*').in('id', sharedWsIds).eq('type', 'shared'),
-              client.from('workspace_members').select('*').in('workspace_id', sharedWsIds),
+              client.from('workspaces').select('*').in('id', approvedCloudWsIds),
+              client.from('workspace_members').select('*').in('workspace_id', approvedCloudWsIds),
             ]);
 
             const remoteWorkspaces = remoteWorkspacesRes.data;
@@ -198,7 +214,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                     name: m.name,
                     email: m.email,
                     role: m.role as WorkspaceRole,
-                    isCurrentUser: m.email?.toLowerCase().trim() === user.email?.toLowerCase().trim(),
+                    isCurrentUser: m.email?.toLowerCase().trim() === userEmail,
                   }));
 
                 if (!alreadyHas) {
@@ -206,7 +222,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
                     id: rw.id,
                     name: rw.name,
                     description: rw.description || '',
-                    type: 'shared',
+                    type: rw.type || 'shared',
                     inviteCode: rw.invite_code || '',
                     createdAt: rw.created_at,
                     members: wsMembersFromCloud,
@@ -231,7 +247,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     setWorkspaces(list);
 
-    // Prioriza o espaço padrão definido pelo usuário se ele existir na lista
+    // Carrega o espaço padrão configurado pelo usuário
     const savedDefaultId = await WorkspaceRepository.getDefaultWorkspaceId();
     const effectiveDefaultId = savedDefaultId === 'ws-solo' ? personalWsId : savedDefaultId;
     if (savedDefaultId === 'ws-solo') {
@@ -239,20 +255,30 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
     setDefaultWorkspaceIdState(effectiveDefaultId);
 
-    const rawActiveId = (await WorkspaceRepository.getActiveWorkspaceId());
+    // PRESERVAÇÃO RIGOROSA DO ESPAÇO ATIVO:
+    // O usuário NUNCA deve ser retirado do espaço em que está navegando no momento!
+    const rawActiveId = await WorkspaceRepository.getActiveWorkspaceId();
     const effectiveActiveId = rawActiveId === 'ws-solo' ? personalWsId : rawActiveId;
-    const targetId = (effectiveDefaultId && list.some((w) => w.id === effectiveDefaultId))
-      ? effectiveDefaultId
-      : effectiveActiveId;
 
-    const found = list.find((w) => w.id === targetId);
-    if (found) {
-      setActiveWorkspaceIdState(found.id);
-      await WorkspaceRepository.setActiveWorkspaceId(found.id);
-    } else if (list.length > 0) {
-      setActiveWorkspaceIdState(list[0].id);
-      await WorkspaceRepository.setActiveWorkspaceId(list[0].id);
-    }
+    setActiveWorkspaceIdState((currentId) => {
+      // 1. Se o espaço em que o usuário está atualmente na memória continua existindo na lista, MANTENHA-O!
+      if (currentId && list.some((w) => w.id === currentId)) {
+        return currentId;
+      }
+      // 2. Se o espaço ativo persistido no armazenamento local existe na lista, mantenha-o!
+      if (effectiveActiveId && list.some((w) => w.id === effectiveActiveId)) {
+        return effectiveActiveId;
+      }
+      // 3. APENAS na primeira inicialização do app (boot frio): se houver um padrão definido, use-o
+      if (isInitialBoot && effectiveDefaultId && list.some((w) => w.id === effectiveDefaultId)) {
+        WorkspaceRepository.setActiveWorkspaceId(effectiveDefaultId).catch(() => {});
+        return effectiveDefaultId;
+      }
+      // 4. Fallback seguro para o primeiro espaço da lista
+      const fallbackId = list[0]?.id || personalWsId;
+      WorkspaceRepository.setActiveWorkspaceId(fallbackId).catch(() => {});
+      return fallbackId;
+    });
   };
 
   const activeWorkspace =
@@ -311,29 +337,32 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ],
     };
 
-    const updated = [...workspaces, newWs];
+    const currentList = await WorkspaceRepository.getWorkspaces();
+    const updated = [...currentList.filter((w) => w.id !== newWs.id), newWs];
     setWorkspaces(updated);
     await WorkspaceRepository.saveWorkspaces(updated);
     await setActiveWorkspace(newWs.id);
 
-    // Save to cloud in background
+    // Salva na nuvem no Supabase
     try {
       const client = await SupabaseService.getClient();
-      await client.from('workspaces').upsert({
-        id: newWs.id,
-        name: newWs.name,
-        description: newWs.description,
-        type: newWs.type,
-        invite_code: newWs.inviteCode,
-        created_at: newWs.createdAt,
-      });
-      await client.from('workspace_members').upsert({
-        id: `mem-${newWs.id}-owner`,
-        workspace_id: newWs.id,
-        email: ownerEmail.toLowerCase(),
-        name: ownerName,
-        role: 'owner',
-      });
+      await Promise.all([
+        client.from('workspaces').upsert({
+          id: newWs.id,
+          name: newWs.name,
+          description: newWs.description,
+          type: newWs.type,
+          invite_code: newWs.inviteCode,
+          created_at: newWs.createdAt,
+        }),
+        client.from('workspace_members').upsert({
+          id: `mem-${newWs.id}-owner`,
+          workspace_id: newWs.id,
+          email: ownerEmail.toLowerCase().trim(),
+          name: ownerName,
+          role: 'owner',
+        }),
+      ]);
     } catch {}
   };
 
