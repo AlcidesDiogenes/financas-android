@@ -14,7 +14,7 @@ export interface ReleaseNote {
 
 export const APP_VERSION_CONFIG = {
   version: '1.3.7',
-  buildNumber: 11,
+  buildNumber: 12,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -27,11 +27,16 @@ export const getAppVersionString = (): string => {
 export const RELEASE_HISTORY: ReleaseNote[] = [
   {
     version: '1.3.7',
-    buildNumber: 11,
+    buildNumber: 12,
     date: '06/10/2026',
-    title: 'Saldo Previsto, Gestão de Espaços e Melhorias Visuais ✨',
-    highlight: 'Modo de saldo previsto, modal moderno de gestão de membros e novas validações.',
+    title: 'Ajuste de Modais com Teclado e Gestão Visual ✨',
+    highlight: 'Eliminação de vão entre teclado e modal, tela de fundo 100% protegida e novo modal de membros.',
     changes: [
+      {
+        icon: 'key-outline',
+        title: 'Fim do Vão do Teclado nos Modais',
+        description: 'Eliminado o espaçamento indesejado abaixo dos formulários ao abrir o teclado. O modal agora encosta perfeitamente no teclado com fundo 100% protegido.',
+      },
       {
         icon: 'people-outline',
         title: 'Novo Modal de Gestão de Membros',

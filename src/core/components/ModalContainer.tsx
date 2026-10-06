@@ -35,13 +35,24 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
       statusBarTranslucent
       onRequestClose={onClose}
     >
+      {/* 1. Backdrop escuro fixo cobrindo 100% da tela em qualquer circunstância */}
+      <View style={[StyleSheet.absoluteFill, styles.backdropOverlay]}>
+        <TouchableOpacity
+          style={StyleSheet.absoluteFill}
+          activeOpacity={1}
+          onPress={onClose}
+        />
+      </View>
+
+      {/* 2. Container evitando o teclado colado na base sem vão artificial */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-        keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 24}
-        style={styles.overlay}
+        keyboardVerticalOffset={0}
+        style={styles.keyboardContainer}
+        pointerEvents="box-none"
       >
         <TouchableOpacity
-          style={styles.backdrop}
+          style={styles.dismissArea}
           activeOpacity={1}
           onPress={onClose}
         />
@@ -75,12 +86,14 @@ export const ModalContainer: React.FC<ModalContainerProps> = ({
 };
 
 const styles = StyleSheet.create({
-  overlay: {
-    flex: 1,
-    justifyContent: 'flex-end',
+  backdropOverlay: {
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
   },
-  backdrop: {
+  keyboardContainer: {
+    flex: 1,
+    justifyContent: 'flex-end',
+  },
+  dismissArea: {
     flex: 1,
   },
   sheet: {
@@ -103,6 +116,6 @@ const styles = StyleSheet.create({
   },
   content: {
     padding: 20,
-    paddingBottom: 60,
+    paddingBottom: 80,
   },
 });
