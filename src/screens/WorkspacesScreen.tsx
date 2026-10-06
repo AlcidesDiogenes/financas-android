@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import {
   View,
   Text,
@@ -8,11 +8,12 @@ import {
   Alert,
   Share,
   Modal,
+  RefreshControl,
 } from 'react-native';
 import { useTheme } from '../core/theme/ThemeContext';
 import { useAuth } from '../services/auth/AuthContext';
 import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
-import { WorkspaceRole } from '../modules/workspaces/types';
+import { WorkspaceRole, WorkspaceMember } from '../modules/workspaces/types';
 import { Card } from '../core/components/Card';
 import { Badge } from '../core/components/Badge';
 import { Button } from '../core/components/Button';
@@ -25,6 +26,7 @@ export const WorkspacesScreen: React.FC = () => {
   const { theme } = useTheme();
   const { user } = useAuth();
   const [showAuthModal, setShowAuthModal] = useState(false);
+  const [isRefreshing, setIsRefreshing] = useState(false);
   const {
     workspaces,
     activeWorkspace,
@@ -44,6 +46,7 @@ export const WorkspacesScreen: React.FC = () => {
     joinWorkspaceByCode,
     currentUserRole,
     pendingRequestsCount,
+    refreshWorkspaces,
   } = useWorkspace();
 
   // Rename Workspace Modal
@@ -246,9 +249,48 @@ export const WorkspacesScreen: React.FC = () => {
     handleCloseManageMember();
   };
 
+  const handleRefresh = async () => {
+    setIsRefreshing(true);
+    try {
+      await refreshWorkspaces();
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
+
+  const allPendingRequests = useMemo(() => {
+    const list: Array<{
+      workspaceId: string;
+      workspaceName: string;
+      member: WorkspaceMember;
+    }> = [];
+
+    workspaces.forEach((w) => {
+      const isOwner = w.members.some(
+        (m) =>
+          m.role === 'owner' &&
+          (m.isCurrentUser || (user?.email && m.email.toLowerCase().trim() === user.email.toLowerCase().trim()))
+      );
+      if (isOwner) {
+        w.members
+          .filter((m) => m.role === 'pending')
+          .forEach((m) => {
+            list.push({
+              workspaceId: w.id,
+              workspaceName: w.name,
+              member: m,
+            });
+          });
+      }
+    });
+
+    return list;
+  }, [workspaces, user?.email]);
+
   const handleApproveRequest = (
     req: { id: string; name: string; email: string },
-    role: 'editor' | 'viewer'
+    role: 'editor' | 'viewer',
+    wsId: string = activeWorkspace.id
   ) => {
     const roleLabel = role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️';
     Alert.alert(
@@ -259,7 +301,7 @@ export const WorkspacesScreen: React.FC = () => {
         {
           text: 'Confirmar Aprovação',
           onPress: async () => {
-            await approveMember(activeWorkspace.id, req.id, role);
+            await approveMember(wsId, req.id, role);
             Alert.alert('Membro Aprovado! 🎉', `"${req.name}" agora tem acesso a este espaço.`);
           },
         },
@@ -267,7 +309,10 @@ export const WorkspacesScreen: React.FC = () => {
     );
   };
 
-  const handleRejectRequest = (req: { id: string; name: string; email: string }) => {
+  const handleRejectRequest = (
+    req: { id: string; name: string; email: string },
+    wsId: string = activeWorkspace.id
+  ) => {
     Alert.alert(
       'Recusar Solicitação',
       `Tem certeza que deseja recusar a solicitação de "${req.name}" (${req.email})?`,
@@ -277,7 +322,7 @@ export const WorkspacesScreen: React.FC = () => {
           text: 'Recusar',
           style: 'destructive',
           onPress: async () => {
-            await rejectMember(activeWorkspace.id, req.id);
+            await rejectMember(wsId, req.id);
             Alert.alert('Solicitação Recusada', `A solicitação foi recusada e o usuário não terá acesso.`);
           },
         },
@@ -290,6 +335,14 @@ export const WorkspacesScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        refreshControl={
+          <RefreshControl
+            refreshing={isRefreshing}
+            onRefresh={handleRefresh}
+            tintColor={theme.primary}
+            colors={[theme.primary]}
+          />
+        }
       >
         {/* Seletor Compacto de Espaços (Pills no Topo) */}
         <View style={styles.selectorSection}>
@@ -304,6 +357,7 @@ export const WorkspacesScreen: React.FC = () => {
             {workspaces.map((ws) => {
               const isSelected = ws.id === activeWorkspace.id;
               const isItemSolo = ws.type === 'solo';
+              const wsPendingCount = ws.members.filter((m) => m.role === 'pending').length;
 
               return (
                 <TouchableOpacity
@@ -335,6 +389,11 @@ export const WorkspacesScreen: React.FC = () => {
                   >
                     {ws.name}
                   </Text>
+                  {wsPendingCount > 0 && (
+                    <View style={styles.chipPendingBadge}>
+                      <Text style={styles.chipPendingBadgeText}>{wsPendingCount}</Text>
+                    </View>
+                  )}
                   {defaultWorkspaceId === ws.id && (
                     <Ionicons
                       name="star"
@@ -370,6 +429,90 @@ export const WorkspacesScreen: React.FC = () => {
             ) : null}
           </ScrollView>
         </View>
+
+        {/* Bloco Geral de Solicitações Pendentes (visível independente de qual espaço está aberto) */}
+        {allPendingRequests.length > 0 && (
+          <View
+            style={[
+              styles.pendingContainer,
+              { backgroundColor: '#F59E0B14', borderColor: '#F59E0B44', marginBottom: 16 },
+            ]}
+          >
+            <View style={styles.pendingHeaderRow}>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                <Ionicons name="notifications" size={18} color="#F59E0B" style={{ marginRight: 6 }} />
+                <Text style={[styles.pendingSectionTitle, { color: theme.text }]}>
+                  Solicitações de Entrada ({allPendingRequests.length})
+                </Text>
+              </View>
+              <Badge label="Aguardando Aprovação" variant="warning" />
+            </View>
+
+            <Text style={[styles.pendingDescription, { color: theme.textMuted }]}>
+              Pessoas que usaram seu código de convite e aguardam sua aprovação para acessar:
+            </Text>
+
+            {allPendingRequests.map((item) => (
+              <Card key={item.member.id} variant="flat" style={styles.pendingReqCard}>
+                <View style={styles.pendingReqInfo}>
+                  <View
+                    style={[
+                      styles.memberAvatar,
+                      { backgroundColor: '#F59E0B22' },
+                    ]}
+                  >
+                    <Text style={[styles.memberAvatarText, { color: '#F59E0B' }]}>
+                      {(item.member.name.charAt(0) || 'U').toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.memberDetails}>
+                    <Text style={[styles.memberName, { color: theme.text }]}>
+                      {item.member.name}
+                    </Text>
+                    <Text style={[styles.memberEmail, { color: theme.textMuted }]}>
+                      {item.member.email}
+                    </Text>
+                    <View style={{ flexDirection: 'row', alignItems: 'center', marginTop: 3 }}>
+                      <Ionicons name="folder-outline" size={12} color="#8B5CF6" style={{ marginRight: 4 }} />
+                      <Text style={{ fontSize: 11, fontWeight: '700', color: '#8B5CF6' }}>
+                        Espaço: {item.workspaceName}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+
+                <View style={styles.approvalButtonsRow}>
+                  <TouchableOpacity
+                    style={[styles.approveActionBtn, { backgroundColor: '#10B981' }]}
+                    onPress={() => handleApproveRequest(item.member, 'editor', item.workspaceId)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="create-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                    <Text style={styles.approveActionBtnText}>Pode Editar ✏️</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.approveActionBtn, { backgroundColor: '#3B82F6' }]}
+                    onPress={() => handleApproveRequest(item.member, 'viewer', item.workspaceId)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="eye-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                    <Text style={styles.approveActionBtnText}>Apenas Ver 👁️</Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    style={[styles.rejectActionBtn, { borderColor: '#EF444466' }]}
+                    onPress={() => handleRejectRequest(item.member, item.workspaceId)}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="close" size={15} color="#EF4444" style={{ marginRight: 3 }} />
+                    <Text style={[styles.rejectActionBtnText, { color: '#EF4444' }]}>Recusar</Text>
+                  </TouchableOpacity>
+                </View>
+              </Card>
+            ))}
+          </View>
+        )}
 
         {/* Hero Card do Espaço Selecionado */}
         <Card variant="elevated" style={styles.heroCard}>
@@ -1652,5 +1795,20 @@ const styles = StyleSheet.create({
   rejectActionBtnText: {
     fontSize: 11,
     fontWeight: '600',
+  },
+  chipPendingBadge: {
+    backgroundColor: '#F59E0B',
+    borderRadius: 8,
+    minWidth: 16,
+    height: 16,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 4,
+    marginLeft: 6,
+  },
+  chipPendingBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: '800',
   },
 });

@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
+import { AppState } from 'react-native';
 import { Workspace, WorkspaceMember, WorkspaceRole } from './types';
 import {
   WorkspaceRepository,
@@ -34,6 +35,7 @@ interface WorkspaceContextType {
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
   pendingRequestsCount: number;
+  refreshWorkspaces: () => Promise<void>;
 }
 
 const migrateLocalSoloData = async (personalWsId: string) => {
@@ -93,6 +95,26 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   useEffect(() => {
     loadWorkspaces();
+
+    // Atualiza espaços e solicitações pendentes ao voltar para o app
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        loadWorkspaces();
+      }
+    });
+
+    // Polling suave a cada 20s para capturar novos pedidos de entrada em tempo real
+    let timer: ReturnType<typeof setInterval> | null = null;
+    if (user?.id) {
+      timer = setInterval(() => {
+        loadWorkspaces();
+      }, 20000);
+    }
+
+    return () => {
+      subscription.remove();
+      if (timer) clearInterval(timer);
+    };
   }, [user?.id, user?.email]);
 
   const loadWorkspaces = async () => {
@@ -733,6 +755,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         currentUserRole,
         canEdit,
         pendingRequestsCount,
+        refreshWorkspaces: loadWorkspaces,
       }}
     >
       {children}
