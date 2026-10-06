@@ -46,6 +46,13 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showTutorialModal, setShowTutorialModal] = useState(false);
 
+  // Modal Customizado de Atualizações OTA
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [updateStep, setUpdateStep] = useState<'available' | 'downloading' | 'ready'>('available');
+  const [updateDownloadProgress, setUpdateDownloadProgress] = useState(0);
+  const [updateStatusText, setUpdateStatusText] = useState('');
+  const [isReloadingApp, setIsReloadingApp] = useState(false);
+
   // Modal para Alterar Senha
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPassword, setNewPassword] = useState('');
@@ -161,41 +168,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       const update = await Updates.checkForUpdateAsync();
 
       if (update.isAvailable) {
-        Alert.alert(
-          'Nova Atualização Disponível! 🎉',
-          'Encontramos uma nova versão com melhorias e correções. Deseja atualizar agora?',
-          [
-            { text: 'Mais Tarde', style: 'cancel' },
-            {
-              text: 'Atualizar Agora',
-              onPress: async () => {
-                try {
-                  setStatusMessage('Baixando arquivos da atualização...');
-                  await Updates.fetchUpdateAsync();
-                  Alert.alert(
-                    'Atualização Concluída! 🚀',
-                    'A nova versão foi instalada com sucesso. O aplicativo será reiniciado para aplicar as novidades.',
-                    [
-                      {
-                        text: 'Reiniciar Agora',
-                        onPress: async () => {
-                          await Updates.reloadAsync();
-                        },
-                      },
-                    ]
-                  );
-                } catch (downloadErr: any) {
-                  Alert.alert(
-                    'Falha no Download',
-                    `Não foi possível baixar os arquivos da nova versão:\n${downloadErr?.message || 'Verifique sua conexão com a internet.'}`
-                  );
-                } finally {
-                  setStatusMessage('');
-                }
-              },
-            },
-          ]
-        );
+        setUpdateStep('available');
+        setUpdateDownloadProgress(0);
+        setUpdateStatusText('Nova versão pronta para download');
+        setShowUpdateModal(true);
       } else {
         Alert.alert(
           'Aplicativo em Dia! ✨',
@@ -219,6 +195,62 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       setIsCheckingUpdate(false);
       setStatusMessage('');
     }
+  };
+
+  // Iniciar download com progresso visual animado
+  const handleStartUpdateDownload = async () => {
+    setUpdateStep('downloading');
+    setUpdateDownloadProgress(15);
+    setUpdateStatusText('Conectando ao servidor seguro da nuvem...');
+
+    // Progresso simulado fluido enquanto o download real ocorre
+    const interval = setInterval(() => {
+      setUpdateDownloadProgress((prev) => {
+        if (prev < 40) {
+          setUpdateStatusText('Baixando novos arquivos e telas...');
+          return prev + 12;
+        }
+        if (prev < 80) {
+          setUpdateStatusText('Otimizando recursos e preparando código...');
+          return prev + 10;
+        }
+        if (prev < 92) {
+          setUpdateStatusText('Finalizando verificação de integridade...');
+          return prev + 3;
+        }
+        return prev;
+      });
+    }, 400);
+
+    try {
+      await Updates.fetchUpdateAsync();
+      clearInterval(interval);
+      setUpdateDownloadProgress(100);
+      setUpdateStatusText('Instalação concluída com sucesso!');
+      setUpdateStep('ready');
+    } catch (downloadErr: any) {
+      clearInterval(interval);
+      setShowUpdateModal(false);
+      Alert.alert(
+        'Falha no Download',
+        `Não foi possível baixar os arquivos da nova versão:\n${downloadErr?.message || 'Verifique sua conexão com a internet.'}`
+      );
+    }
+  };
+
+  // Reinicialização com tela de transição suave
+  const handleRelaunchApp = async () => {
+    setShowUpdateModal(false);
+    setIsReloadingApp(true);
+    // Aguarda 1.2 segundos mostrando a splash de transição para o usuário perceber claramente o reinício
+    setTimeout(async () => {
+      try {
+        await Updates.reloadAsync();
+      } catch (e) {
+        console.warn('Erro ao recarregar via Updates:', e);
+        setIsReloadingApp(false);
+      }
+    }, 1200);
   };
 
   // Execução final da exclusão de conta
@@ -885,6 +917,137 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
           </View>
         </TouchableOpacity>
       </Modal>
+
+      {/* MODAL DE ATUALIZAÇÃO ELEGANTE (UI/UX) */}
+      <Modal
+        visible={showUpdateModal}
+        transparent
+        animationType="fade"
+        onRequestClose={() => {
+          if (updateStep !== 'downloading') {
+            setShowUpdateModal(false);
+          }
+        }}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.updateModalCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
+            {/* Ícone e Cabeçalho */}
+            <View style={styles.updateIconWrapper}>
+              <View
+                style={[
+                  styles.updateIconCircle,
+                  {
+                    backgroundColor:
+                      updateStep === 'ready'
+                        ? '#E8F5E9'
+                        : updateStep === 'downloading'
+                        ? '#E3F2FD'
+                        : '#EDE7F6',
+                  },
+                ]}
+              >
+                <Ionicons
+                  name={
+                    updateStep === 'ready'
+                      ? 'checkmark-circle'
+                      : updateStep === 'downloading'
+                      ? 'cloud-download'
+                      : 'rocket'
+                  }
+                  size={36}
+                  color={
+                    updateStep === 'ready'
+                      ? '#2E7D32'
+                      : updateStep === 'downloading'
+                      ? theme.primary
+                      : '#673AB7'
+                  }
+                />
+              </View>
+            </View>
+
+            <Text style={[styles.updateModalTitle, { color: theme.text }]}>
+              {updateStep === 'ready'
+                ? 'Atualização Pronta!'
+                : updateStep === 'downloading'
+                ? 'Baixando Atualização...'
+                : 'Nova Versão Disponível! 🎉'}
+            </Text>
+
+            <Text style={[styles.updateModalSubtitle, { color: theme.textMuted }]}>
+              {updateStep === 'ready'
+                ? 'Os novos arquivos foram instalados. Reinicie o aplicativo para ver as novidades imediatamente.'
+                : updateStep === 'downloading'
+                ? updateStatusText
+                : 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'}
+            </Text>
+
+            {/* BARRA DE PROGRESSO VISUAL */}
+            {updateStep === 'downloading' && (
+              <View style={styles.progressContainer}>
+                <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#333' : '#E0E0E0' }]}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: `${updateDownloadProgress}%`,
+                        backgroundColor: theme.primary,
+                      },
+                    ]}
+                  />
+                </View>
+                <View style={styles.progressTextRow}>
+                  <Text style={[styles.progressPercent, { color: theme.primary }]}>
+                    {updateDownloadProgress}%
+                  </Text>
+                  <ActivityIndicator size="small" color={theme.primary} />
+                </View>
+              </View>
+            )}
+
+            {/* AÇÕES DE BOTÕES */}
+            <View style={styles.updateModalActions}>
+              {updateStep === 'available' && (
+                <>
+                  <Button
+                    title="Atualizar Agora"
+                    onPress={handleStartUpdateDownload}
+                    style={{ flex: 1, marginRight: 8 }}
+                  />
+                  <Button
+                    title="Mais Tarde"
+                    variant="outline"
+                    onPress={() => setShowUpdateModal(false)}
+                    style={{ flex: 1 }}
+                  />
+                </>
+              )}
+
+              {updateStep === 'ready' && (
+                <Button
+                  title="Reiniciar Aplicativo Agora 🚀"
+                  onPress={handleRelaunchApp}
+                  style={{ width: '100%' }}
+                />
+              )}
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* OVERLAY DE TRANSIÇÃO SUAVE DE REINÍCIO (SPLASH) */}
+      {isReloadingApp && (
+        <View style={[styles.relaunchSplashOverlay, { backgroundColor: theme.background }]}>
+          <View style={[styles.relaunchLogoCircle, { backgroundColor: theme.primary }]}>
+            <Ionicons name="wallet" size={44} color="#FFF" />
+          </View>
+          <Text style={[styles.relaunchTitle, { color: theme.text }]}>Finanças</Text>
+          <Text style={[styles.relaunchSubtitle, { color: theme.textMuted }]}>
+            Aplicando atualizações e reiniciando...
+          </Text>
+          <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 24 }} />
+        </View>
+      )}
     </View>
   );
 };
@@ -1037,5 +1200,99 @@ const styles = StyleSheet.create({
     fontWeight: '600',
     marginLeft: 6,
     flex: 1,
+  },
+  // ESTILOS DO MODAL DE ATUALIZAÇÃO (UI/UX)
+  updateModalCard: {
+    borderRadius: 24,
+    borderWidth: 1,
+    padding: 24,
+    elevation: 12,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.25,
+    shadowRadius: 16,
+    alignItems: 'center',
+  },
+  updateIconWrapper: {
+    marginBottom: 14,
+  },
+  updateIconCircle: {
+    width: 68,
+    height: 68,
+    borderRadius: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  updateModalTitle: {
+    fontSize: 20,
+    fontWeight: '800',
+    textAlign: 'center',
+    marginBottom: 8,
+  },
+  updateModalSubtitle: {
+    fontSize: 13,
+    lineHeight: 19,
+    textAlign: 'center',
+    marginBottom: 20,
+    paddingHorizontal: 8,
+  },
+  progressContainer: {
+    width: '100%',
+    marginBottom: 20,
+  },
+  progressBarBg: {
+    width: '100%',
+    height: 10,
+    borderRadius: 5,
+    overflow: 'hidden',
+    marginBottom: 8,
+  },
+  progressBarFill: {
+    height: '100%',
+    borderRadius: 5,
+  },
+  progressTextRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 2,
+  },
+  progressPercent: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  updateModalActions: {
+    flexDirection: 'row',
+    width: '100%',
+    marginTop: 6,
+  },
+  // ESTILOS DA TRANSIÇÃO DE REINÍCIO (SPLASH OVERLAY)
+  relaunchSplashOverlay: {
+    ...StyleSheet.absoluteFill,
+    zIndex: 9999,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  relaunchLogoCircle: {
+    width: 88,
+    height: 88,
+    borderRadius: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 16,
+    elevation: 8,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 8,
+  },
+  relaunchTitle: {
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 0.5,
+  },
+  relaunchSubtitle: {
+    fontSize: 13,
+    marginTop: 6,
   },
 });
