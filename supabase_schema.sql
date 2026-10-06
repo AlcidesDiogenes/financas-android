@@ -182,18 +182,47 @@ END;
 $$;
 
 -- ==============================================================================
--- 6. COLUNAS UPDATED_AT E ÍNDICES DE ALTA PERFORMANCE (ESCALABILIDADE E CONCORRÊNCIA)
+-- 6. ATUALIZAÇÕES DEFENSIVAS DE COLUNAS E ÍNDICES DE ALTA PERFORMANCE
 -- ==============================================================================
+-- Garantir tabela recurring_month_records caso tenha sido omitida em versões antigas
+CREATE TABLE IF NOT EXISTS public.recurring_month_records (
+    id TEXT PRIMARY KEY,
+    recurring_id TEXT,
+    workspace_id TEXT,
+    month INTEGER NOT NULL DEFAULT EXTRACT(MONTH FROM CURRENT_DATE),
+    year INTEGER NOT NULL DEFAULT EXTRACT(YEAR FROM CURRENT_DATE),
+    amount NUMERIC(12, 2) NOT NULL DEFAULT 0,
+    is_paid BOOLEAN DEFAULT FALSE,
+    paid_at TIMESTAMP WITH TIME ZONE,
+    transaction_id TEXT,
+    created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
+-- Garantir colunas de controle e datas em todas as tabelas
 ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 ALTER TABLE public.recurrings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE public.recurrings ADD COLUMN IF NOT EXISTS start_date TEXT;
+ALTER TABLE public.recurrings ADD COLUMN IF NOT EXISTS end_date TEXT;
+
+ALTER TABLE public.recurring_month_records ADD COLUMN IF NOT EXISTS month INTEGER DEFAULT EXTRACT(MONTH FROM CURRENT_DATE);
+ALTER TABLE public.recurring_month_records ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT EXTRACT(YEAR FROM CURRENT_DATE);
 ALTER TABLE public.recurring_month_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS month INTEGER DEFAULT EXTRACT(MONTH FROM CURRENT_DATE);
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS year INTEGER DEFAULT EXTRACT(YEAR FROM CURRENT_DATE);
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS start_date TEXT;
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS end_date TEXT;
 ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
 ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
 
+-- Índices de busca rápida (garante velocidade sem depender de colunas ausentes)
 CREATE INDEX IF NOT EXISTS idx_transactions_workspace_date ON public.transactions(workspace_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_recurrings_workspace ON public.recurrings(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_recurring_month_records_workspace ON public.recurring_month_records(workspace_id, year, month);
-CREATE INDEX IF NOT EXISTS idx_budgets_workspace ON public.budgets(workspace_id, year, month);
+CREATE INDEX IF NOT EXISTS idx_recurring_month_records_workspace ON public.recurring_month_records(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_budgets_workspace ON public.budgets(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_goals_workspace ON public.goals(workspace_id);
-CREATE INDEX IF NOT EXISTS idx_workspace_members_email ON public.workspace_members(email, workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_email ON public.workspace_members(email);
+
 
