@@ -144,11 +144,14 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           .select('workspace_id, role, name, email')
           .eq('email', user.email.toLowerCase().trim());
 
-        if (memberRows && memberRows.length > 0) {
-          // Filtra apenas workspaces compartilhados (que não sejam espaços solo pessoais)
+        if (memberRows) {
+          // Filtra apenas workspaces compartilhados aos quais este usuário realmente pertence na nuvem
           const sharedWsIds = memberRows
             .map((m) => m.workspace_id)
             .filter((id) => id !== personalWsId && !id.startsWith('ws-solo'));
+
+          // Remove da lista local qualquer espaço compartilhado do qual o usuário tenha sido desvinculado
+          list = list.filter((w) => w.id === personalWsId || sharedWsIds.includes(w.id));
 
           if (sharedWsIds.length > 0) {
             const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
@@ -375,6 +378,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   };
 
   const removeMember = async (workspaceId: string, memberId: string) => {
+    const targetWs = workspaces.find((w) => w.id === workspaceId);
+    const targetMem = targetWs?.members.find((m) => m.id === memberId);
+
     const updated = workspaces.map((w) => {
       if (w.id === workspaceId) {
         return {
@@ -391,6 +397,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     try {
       const client = await SupabaseService.getClient();
       await client.from('workspace_members').delete().eq('id', memberId);
+      if (targetMem?.email) {
+        await client
+          .from('workspace_members')
+          .delete()
+          .eq('workspace_id', workspaceId)
+          .eq('email', targetMem.email.toLowerCase().trim());
+      }
     } catch {}
   };
 
