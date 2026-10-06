@@ -411,12 +411,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
       // 1. Apaga também explicitamente todos os registros do workspace pessoal no Supabase
       try {
+        const personalWsId = user?.id ? `ws-${user.id}` : 'ws-solo';
         await Promise.all([
-          client.from('transactions').delete().eq('workspace_id', 'ws-solo'),
-          client.from('recurrings').delete().eq('workspace_id', 'ws-solo'),
-          client.from('recurring_month_records').delete().eq('workspace_id', 'ws-solo'),
-          client.from('budgets').delete().eq('workspace_id', 'ws-solo'),
-          client.from('goals').delete().eq('workspace_id', 'ws-solo'),
+          client.from('transactions').delete().eq('workspace_id', personalWsId),
+          client.from('recurrings').delete().eq('workspace_id', personalWsId),
+          client.from('recurring_month_records').delete().eq('workspace_id', personalWsId),
+          client.from('budgets').delete().eq('workspace_id', personalWsId),
+          client.from('goals').delete().eq('workspace_id', personalWsId),
+          client.from('workspaces').delete().eq('id', personalWsId),
         ]);
       } catch {}
 

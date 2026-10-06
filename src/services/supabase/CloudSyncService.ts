@@ -58,16 +58,18 @@ export class CloudSyncService {
     try {
       const auth = await this.getAuthenticatedClient();
       if (!auth) return;
+      const personalWsId = `ws-${auth.user.id}`;
+      const wsId = (!t.workspaceId || t.workspaceId === 'ws-solo') ? personalWsId : t.workspaceId;
       const base = {
         id: t.id,
-        workspace_id: t.workspaceId,
+        workspace_id: wsId,
         title: t.title,
         amount: t.amount,
         type: t.type,
         category: t.category,
         date: t.date,
         notes: t.notes,
-        created_by: t.createdBy,
+        created_by: t.createdBy || auth.user.email || null,
       };
       await this.safeUpsert(auth.client, 'transactions', { ...base, updated_at: t.updatedAt || new Date().toISOString() }, base);
     } catch {}
@@ -85,9 +87,11 @@ export class CloudSyncService {
     try {
       const auth = await this.getAuthenticatedClient();
       if (!auth) return;
+      const personalWsId = `ws-${auth.user.id}`;
+      const wsId = (!r.workspaceId || r.workspaceId === 'ws-solo') ? personalWsId : r.workspaceId;
       const base = {
         id: r.id,
-        workspace_id: r.workspaceId,
+        workspace_id: wsId,
         title: r.title,
         amount: r.amount,
         type: r.type || 'expense',
@@ -117,10 +121,12 @@ export class CloudSyncService {
     try {
       const auth = await this.getAuthenticatedClient();
       if (!auth) return;
+      const personalWsId = `ws-${auth.user.id}`;
+      const wsId = (!rec.workspaceId || rec.workspaceId === 'ws-solo') ? personalWsId : rec.workspaceId;
       const base = {
         id: rec.id,
         recurring_id: rec.recurringId,
-        workspace_id: rec.workspaceId,
+        workspace_id: wsId,
         month: rec.month,
         year: rec.year,
         amount: rec.amount,
@@ -144,9 +150,11 @@ export class CloudSyncService {
     try {
       const auth = await this.getAuthenticatedClient();
       if (!auth) return;
+      const personalWsId = `ws-${auth.user.id}`;
+      const wsId = (!b.workspaceId || b.workspaceId === 'ws-solo') ? personalWsId : b.workspaceId;
       const base = {
         id: b.id,
-        workspace_id: b.workspaceId,
+        workspace_id: wsId,
         category: b.category,
         limit_amount: b.limitAmount,
         month: b.month,
@@ -170,9 +178,11 @@ export class CloudSyncService {
     try {
       const auth = await this.getAuthenticatedClient();
       if (!auth) return;
+      const personalWsId = `ws-${auth.user.id}`;
+      const wsId = (!g.workspaceId || g.workspaceId === 'ws-solo') ? personalWsId : g.workspaceId;
       const base = {
         id: g.id,
-        workspace_id: g.workspaceId,
+        workspace_id: wsId,
         title: g.title,
         target_amount: g.targetAmount,
         current_amount: g.currentAmount,
@@ -236,6 +246,10 @@ export class CloudSyncService {
       }
 
       const client = auth.client;
+      const user = auth.user;
+      const personalWsId = `ws-${user.id}`;
+      const sanitizeWsId = (wsId?: string) => (!wsId || wsId === 'ws-solo') ? personalWsId : wsId;
+
       const [workspaces, transactions, recurrings, monthRecords, budgets, goals] = await Promise.all([
         WorkspaceRepository.getWorkspaces(),
         TransactionRepository.getAll(),
@@ -246,29 +260,33 @@ export class CloudSyncService {
       ]);
 
       if (workspaces.length > 0) {
-        await client.from('workspaces').upsert(
-          workspaces.map((w) => ({
-            id: w.id,
+        const validWorkspaces = workspaces
+          .filter((w) => w.id !== 'ws-solo')
+          .map((w) => ({
+            id: w.type === 'solo' ? personalWsId : w.id,
             name: w.name,
             description: w.description,
             type: w.type,
             invite_code: w.inviteCode,
             created_at: w.createdAt,
-          }))
-        );
+          }));
+
+        if (validWorkspaces.length > 0) {
+          await client.from('workspaces').upsert(validWorkspaces);
+        }
       }
 
       if (transactions.length > 0) {
         const txBase = transactions.map((t) => ({
           id: t.id,
-          workspace_id: t.workspaceId,
+          workspace_id: sanitizeWsId(t.workspaceId),
           title: t.title,
           amount: t.amount,
           type: t.type,
           category: t.category,
           date: t.date,
           notes: t.notes,
-          created_by: t.createdBy,
+          created_by: t.createdBy || user.email || null,
         }));
         const txWithUpdated = transactions.map((t, idx) => ({
           ...txBase[idx],
@@ -280,7 +298,7 @@ export class CloudSyncService {
       if (recurrings.length > 0) {
         const recBase = recurrings.map((r) => ({
           id: r.id,
-          workspace_id: r.workspaceId,
+          workspace_id: sanitizeWsId(r.workspaceId),
           title: r.title,
           amount: r.amount,
           type: r.type || 'expense',
@@ -305,7 +323,7 @@ export class CloudSyncService {
         const mrBase = monthRecords.map((m) => ({
           id: m.id,
           recurring_id: m.recurringId,
-          workspace_id: m.workspaceId,
+          workspace_id: sanitizeWsId(m.workspaceId),
           month: m.month,
           year: m.year,
           amount: m.amount,
@@ -323,7 +341,7 @@ export class CloudSyncService {
       if (budgets.length > 0) {
         const bdgBase = budgets.map((b) => ({
           id: b.id,
-          workspace_id: b.workspaceId,
+          workspace_id: sanitizeWsId(b.workspaceId),
           category: b.category,
           limit_amount: b.limitAmount,
           month: b.month,
@@ -341,7 +359,7 @@ export class CloudSyncService {
       if (goals.length > 0) {
         const goalBase = goals.map((g) => ({
           id: g.id,
-          workspace_id: g.workspaceId,
+          workspace_id: sanitizeWsId(g.workspaceId),
           title: g.title,
           target_amount: g.targetAmount,
           current_amount: g.currentAmount,
@@ -392,7 +410,8 @@ export class CloudSyncService {
       }
 
       const personalWsId = `ws-${user.id}`;
-      const allowedWorkspaceIds = Array.from(new Set([...memberWorkspaceIds, personalWsId, 'ws-solo']));
+      // NUNCA incluir 'ws-solo' nas permissões da nuvem! Apenas o espaço pessoal exclusivo deste user e os compartilhados onde é membro.
+      const allowedWorkspaceIds = Array.from(new Set([...memberWorkspaceIds, personalWsId]));
 
       // Consulta otimizada com limite inteligente e ordenação por data
       const [txRes, recRes, recMonthRes, bdgRes, goalRes] = await Promise.all([
@@ -403,18 +422,34 @@ export class CloudSyncService {
         client.from('goals').select('*').in('workspace_id', allowedWorkspaceIds),
       ]);
 
-      // 1. TRANSAÇÕES: Smart Merge Bidirecional (Last-Write-Wins baseado em timestamps)
+      // 1. TRANSAÇÕES: Smart Merge Bidirecional e Purga de Órfãos
       if (Array.isArray(txRes.data)) {
         const localTxs = await TransactionRepository.getAll();
         const mergedMap = new Map<string, Transaction>();
 
-        // Começa com os dados locais para garantir que lançamentos offline NÃO sejam perdidos
+        // Começa com os dados locais que pertencem aos workspaces autorizados deste usuário
         for (const localItem of localTxs) {
-          mergedMap.set(localItem.id, localItem);
+          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
+
+          // Se pertencer ao ws-solo antigo mas tiver createdBy de outro usuário, descarta (vazamento anterior)
+          if (
+            localItem.workspaceId === 'ws-solo' &&
+            localItem.createdBy &&
+            localItem.createdBy.toLowerCase() !== userEmail &&
+            localItem.createdBy !== 'Você'
+          ) {
+            continue;
+          }
+
+          if (allowedWorkspaceIds.includes(mappedWsId)) {
+            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
+          }
         }
 
-        // Conflito e novidades da nuvem
+        // Conflito e novidades da nuvem (garantindo filtro estrito)
         for (const row of txRes.data) {
+          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
+
           const cloudItem: Transaction = {
             id: row.id,
             workspaceId: row.workspace_id,
@@ -430,10 +465,8 @@ export class CloudSyncService {
 
           const localItem = mergedMap.get(cloudItem.id);
           if (!localItem) {
-            // Novo item na nuvem
             mergedMap.set(cloudItem.id, cloudItem);
           } else {
-            // Comparação de timestamps determinística (Last-Write-Wins)
             const localTimestamp = new Date(localItem.updatedAt || localItem.date || 0).getTime();
             const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.date || 0).getTime();
             if (cloudTimestamp >= localTimestamp) {
@@ -445,16 +478,21 @@ export class CloudSyncService {
         await TransactionRepository.saveAll(Array.from(mergedMap.values()));
       }
 
-      // 2. RECORRENTES: Smart Merge
+      // 2. RECORRENTES: Smart Merge e Purga
       if (Array.isArray(recRes.data)) {
         const localRecs = await RecurringRepository.getAll();
         const mergedMap = new Map<string, RecurringDebit>();
 
         for (const localItem of localRecs) {
-          mergedMap.set(localItem.id, localItem);
+          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
+          if (allowedWorkspaceIds.includes(mappedWsId)) {
+            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
+          }
         }
 
         for (const row of recRes.data) {
+          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
+
           const cloudItem: RecurringDebit = {
             id: row.id,
             workspaceId: row.workspace_id,
@@ -489,16 +527,21 @@ export class CloudSyncService {
         await RecurringRepository.saveAll(Array.from(mergedMap.values()));
       }
 
-      // 3. REGISTROS MENSAIS DE RECORRENTES: Smart Merge
+      // 3. REGISTROS MENSAIS DE RECORRENTES: Smart Merge e Purga
       if (Array.isArray(recMonthRes.data)) {
         const localMonths = await RecurringMonthRepository.getAll();
         const mergedMap = new Map<string, RecurringMonthRecord>();
 
         for (const localItem of localMonths) {
-          mergedMap.set(localItem.id, localItem);
+          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
+          if (allowedWorkspaceIds.includes(mappedWsId)) {
+            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
+          }
         }
 
         for (const row of recMonthRes.data) {
+          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
+
           const cloudItem: RecurringMonthRecord = {
             id: row.id,
             recurringId: row.recurring_id,
@@ -527,16 +570,21 @@ export class CloudSyncService {
         await RecurringMonthRepository.saveAll(Array.from(mergedMap.values()));
       }
 
-      // 4. ORÇAMENTOS: Smart Merge
+      // 4. ORÇAMENTOS: Smart Merge e Purga
       if (Array.isArray(bdgRes.data)) {
         const localBudgets = await BudgetRepository.getAll();
         const mergedMap = new Map<string, Budget>();
 
         for (const localItem of localBudgets) {
-          mergedMap.set(localItem.id, localItem);
+          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
+          if (allowedWorkspaceIds.includes(mappedWsId)) {
+            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
+          }
         }
 
         for (const row of bdgRes.data) {
+          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
+
           const cloudItem: Budget = {
             id: row.id,
             workspaceId: row.workspace_id,
@@ -564,16 +612,21 @@ export class CloudSyncService {
         await BudgetRepository.saveAll(Array.from(mergedMap.values()));
       }
 
-      // 5. METAS: Smart Merge
+      // 5. METAS: Smart Merge e Purga
       if (Array.isArray(goalRes.data)) {
         const localGoals = await GoalRepository.getAll();
         const mergedMap = new Map<string, Goal>();
 
         for (const localItem of localGoals) {
-          mergedMap.set(localItem.id, localItem);
+          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
+          if (allowedWorkspaceIds.includes(mappedWsId)) {
+            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
+          }
         }
 
         for (const row of goalRes.data) {
+          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
+
           const cloudItem: Goal = {
             id: row.id,
             workspaceId: row.workspace_id,

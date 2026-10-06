@@ -14,7 +14,7 @@ export interface ReleaseNote {
 
 export const APP_VERSION_CONFIG = {
   version: '1.0.0',
-  buildNumber: 1,
+  buildNumber: 2,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -25,6 +25,34 @@ export const getAppVersionString = (): string => {
 };
 
 export const RELEASE_HISTORY: ReleaseNote[] = [
+  {
+    version: '1.0.0',
+    buildNumber: 2,
+    date: '06/10/2026',
+    title: 'Isolamento Estrito de Contas & Privacidade Multi-Tenant 🔒',
+    highlight:
+      'Garantia matemática de privacidade: cada usuário possui seu espaço pessoal 100% isolado na nuvem e no dispositivo. Espaços compartilhados são restritos estritamente aos membros autorizados.',
+    changes: [
+      {
+        icon: 'lock-closed-outline',
+        title: 'Espaços Pessoais Exclusivos',
+        description:
+          'O espaço pessoal de cada usuário agora utiliza um identificador exclusivo criptografado vinculado à sua conta, impedindo qualquer cruzamento de dados com terceiros.',
+      },
+      {
+        icon: 'people-outline',
+        title: 'Controle de Compartilhamento',
+        description:
+          'Espaços compartilhados exigem permissão explícita na nuvem. Apenas membros convidados e confirmados visualizam ou interagem com os lançamentos.',
+      },
+      {
+        icon: 'trash-outline',
+        title: 'Purga Automática de Cache Órfão',
+        description:
+          'O sincronizador agora remove automaticamente do armazenamento local qualquer dado que não pertença aos espaços autorizados da conta conectada.',
+      },
+    ],
+  },
   {
     version: '1.0.0',
     buildNumber: 1,

@@ -5,9 +5,18 @@ const WORKSPACES_STORAGE_KEY = '@financas:workspaces_v1';
 const ACTIVE_WORKSPACE_KEY = '@financas:active_workspace_id_v1';
 const DEFAULT_WORKSPACE_KEY = '@financas:default_workspace_id_v1';
 
-export const DEFAULT_WORKSPACES: Workspace[] = [
-  {
-    id: 'ws-solo',
+export const getPersonalWorkspaceId = (userId?: string): string => {
+  return userId ? `ws-${userId}` : 'ws-solo';
+};
+
+export const createDefaultPersonalWorkspace = (
+  userId?: string,
+  userName?: string,
+  userEmail?: string
+): Workspace => {
+  const wsId = getPersonalWorkspaceId(userId);
+  return {
+    id: wsId,
     name: 'Finanças Pessoais',
     description: 'Espaço individual e privado. Apenas você tem acesso.',
     type: 'solo',
@@ -15,14 +24,18 @@ export const DEFAULT_WORKSPACES: Workspace[] = [
     createdAt: new Date().toISOString(),
     members: [
       {
-        id: 'user-1',
-        name: 'Você',
-        email: 'meu@email.com',
+        id: userId ? `mem-${userId}` : 'user-1',
+        name: userName || 'Você',
+        email: userEmail || 'meu@email.com',
         role: 'owner',
         isCurrentUser: true,
       },
     ],
-  },
+  };
+};
+
+export const DEFAULT_WORKSPACES: Workspace[] = [
+  createDefaultPersonalWorkspace(),
 ];
 
 export class WorkspaceRepository {

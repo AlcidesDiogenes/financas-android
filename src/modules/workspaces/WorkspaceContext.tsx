@@ -1,8 +1,18 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Workspace, WorkspaceMember, WorkspaceRole } from './types';
-import { WorkspaceRepository, DEFAULT_WORKSPACES } from './repository';
+import {
+  WorkspaceRepository,
+  DEFAULT_WORKSPACES,
+  getPersonalWorkspaceId,
+  createDefaultPersonalWorkspace,
+} from './repository';
 import { useAuth } from '../../services/auth/AuthContext';
 import { SupabaseService } from '../../services/supabase/supabaseClient';
+import { TransactionRepository } from '../transactions/repository';
+import { RecurringRepository } from '../recurrings/repository';
+import { RecurringMonthRepository } from '../recurrings/monthRepository';
+import { BudgetRepository } from '../budgets/repository';
+import { GoalRepository } from '../goals/repository';
 
 interface WorkspaceContextType {
   workspaces: Workspace[];
@@ -23,6 +33,53 @@ interface WorkspaceContextType {
   canEdit: boolean;
 }
 
+const migrateLocalSoloData = async (personalWsId: string) => {
+  try {
+    const [txs, recs, months, budgets, goals] = await Promise.all([
+      TransactionRepository.getAll(),
+      RecurringRepository.getAll(),
+      RecurringMonthRepository.getAll(),
+      BudgetRepository.getAll(),
+      GoalRepository.getAll(),
+    ]);
+
+    if (txs.some((t) => t.workspaceId === 'ws-solo')) {
+      const updated = txs.map((t) =>
+        t.workspaceId === 'ws-solo' ? { ...t, workspaceId: personalWsId } : t
+      );
+      await TransactionRepository.saveAll(updated);
+    }
+
+    if (recs.some((r) => r.workspaceId === 'ws-solo')) {
+      const updated = recs.map((r) =>
+        r.workspaceId === 'ws-solo' ? { ...r, workspaceId: personalWsId } : r
+      );
+      await RecurringRepository.saveAll(updated);
+    }
+
+    if (months.some((m) => m.workspaceId === 'ws-solo')) {
+      const updated = months.map((m) =>
+        m.workspaceId === 'ws-solo' ? { ...m, workspaceId: personalWsId } : m
+      );
+      await RecurringMonthRepository.saveAll(updated);
+    }
+
+    if (budgets.some((b) => b.workspaceId === 'ws-solo')) {
+      const updated = budgets.map((b) =>
+        b.workspaceId === 'ws-solo' ? { ...b, workspaceId: personalWsId } : b
+      );
+      await BudgetRepository.saveAll(updated);
+    }
+
+    if (goals.some((g) => g.workspaceId === 'ws-solo')) {
+      const updated = goals.map((g) =>
+        g.workspaceId === 'ws-solo' ? { ...g, workspaceId: personalWsId } : g
+      );
+      await GoalRepository.saveAll(updated);
+    }
+  } catch {}
+};
+
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
 
 export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
@@ -33,23 +90,52 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
   useEffect(() => {
     loadWorkspaces();
-  }, [user?.email]);
+  }, [user?.id, user?.email]);
 
   const loadWorkspaces = async () => {
     // No modo offline, permite apenas o espaço pessoal solo
     if (!user) {
-      const soloList = DEFAULT_WORKSPACES;
+      const soloList = [createDefaultPersonalWorkspace()];
       setWorkspaces(soloList);
       setActiveWorkspaceIdState(soloList[0].id);
       return;
     }
 
+    const personalWsId = getPersonalWorkspaceId(user.id);
     let list = await WorkspaceRepository.getWorkspaces();
-    const savedDefaultId = await WorkspaceRepository.getDefaultWorkspaceId();
-    setDefaultWorkspaceIdState(savedDefaultId);
-    const activeId = savedDefaultId || (await WorkspaceRepository.getActiveWorkspaceId());
 
-    // If user is authenticated, check for email invitations in Supabase
+    // 1. Assegura que o espaço pessoal do usuário autenticado é ws-${user.id} e privado
+    const personalWs = createDefaultPersonalWorkspace(user.id, user.name, user.email);
+
+    // Filtra para remover qualquer 'ws-solo' genérico e qualquer outro espaço solo que não seja deste user.id
+    const sharedWorkspaces = list.filter((w) => w.type !== 'solo' && w.id !== 'ws-solo' && w.id !== personalWsId);
+    list = [personalWs, ...sharedWorkspaces];
+
+    // Migra itens locais que estavam vinculados ao antigo 'ws-solo' para o personalWsId deste usuário
+    await migrateLocalSoloData(personalWsId);
+    await WorkspaceRepository.saveWorkspaces(list);
+
+    // Registra/garante o espaço pessoal deste usuário no Supabase
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspaces').upsert({
+        id: personalWsId,
+        name: personalWs.name,
+        description: personalWs.description,
+        type: 'solo',
+        invite_code: null,
+        created_at: personalWs.createdAt,
+      });
+      await client.from('workspace_members').upsert({
+        id: `mem-${personalWsId}-owner`,
+        workspace_id: personalWsId,
+        email: user.email.toLowerCase().trim(),
+        name: user.name || 'Você',
+        role: 'owner',
+      });
+    } catch {}
+
+    // 2. Busca convites em espaços compartilhados no Supabase
     if (user?.email) {
       try {
         const client = await SupabaseService.getClient();
@@ -59,66 +145,77 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           .eq('email', user.email.toLowerCase().trim());
 
         if (memberRows && memberRows.length > 0) {
-          const workspaceIds = memberRows.map((m) => m.workspace_id);
-          const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
-            client.from('workspaces').select('*').in('id', workspaceIds),
-            client.from('workspace_members').select('*').in('workspace_id', workspaceIds),
-          ]);
+          // Filtra apenas workspaces compartilhados (que não sejam espaços solo pessoais)
+          const sharedWsIds = memberRows
+            .map((m) => m.workspace_id)
+            .filter((id) => id !== personalWsId && !id.startsWith('ws-solo'));
 
-          const remoteWorkspaces = remoteWorkspacesRes.data;
-          const allMembers = allMembersRes.data || [];
+          if (sharedWsIds.length > 0) {
+            const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
+              client.from('workspaces').select('*').in('id', sharedWsIds).eq('type', 'shared'),
+              client.from('workspace_members').select('*').in('workspace_id', sharedWsIds),
+            ]);
 
-          if (remoteWorkspaces) {
-            remoteWorkspaces.forEach((rw) => {
-              const alreadyHas = list.some((w) => w.id === rw.id);
-              const wsMembersFromCloud: WorkspaceMember[] = allMembers
-                .filter((m) => m.workspace_id === rw.id)
-                .map((m) => ({
-                  id: m.id,
-                  name: m.name,
-                  email: m.email,
-                  role: m.role as WorkspaceRole,
-                  isCurrentUser: m.email?.toLowerCase().trim() === user.email?.toLowerCase().trim(),
-                }));
+            const remoteWorkspaces = remoteWorkspacesRes.data;
+            const allMembers = allMembersRes.data || [];
 
-              if (!alreadyHas) {
-                list.push({
-                  id: rw.id,
-                  name: rw.name,
-                  description: rw.description || '',
-                  type: rw.type as any,
-                  inviteCode: rw.invite_code || '',
-                  createdAt: rw.created_at,
-                  members: wsMembersFromCloud.length > 0 ? wsMembersFromCloud : [
-                    {
-                      id: `member-${user.id}`,
-                      name: user.name || 'Você',
-                      email: user.email,
-                      role: 'owner',
-                      isCurrentUser: true,
-                    },
-                  ],
-                });
-              } else {
-                // Atualiza lista de membros do espaço já existente
-                const existingIdx = list.findIndex((w) => w.id === rw.id);
-                if (existingIdx >= 0 && wsMembersFromCloud.length > 0) {
-                  list[existingIdx] = {
-                    ...list[existingIdx],
+            if (remoteWorkspaces) {
+              remoteWorkspaces.forEach((rw) => {
+                const alreadyHas = list.some((w) => w.id === rw.id);
+                const wsMembersFromCloud: WorkspaceMember[] = allMembers
+                  .filter((m) => m.workspace_id === rw.id)
+                  .map((m) => ({
+                    id: m.id,
+                    name: m.name,
+                    email: m.email,
+                    role: m.role as WorkspaceRole,
+                    isCurrentUser: m.email?.toLowerCase().trim() === user.email?.toLowerCase().trim(),
+                  }));
+
+                if (!alreadyHas) {
+                  list.push({
+                    id: rw.id,
+                    name: rw.name,
+                    description: rw.description || '',
+                    type: 'shared',
+                    inviteCode: rw.invite_code || '',
+                    createdAt: rw.created_at,
                     members: wsMembersFromCloud,
-                  };
+                  });
+                } else {
+                  // Atualiza lista de membros do espaço já existente
+                  const existingIdx = list.findIndex((w) => w.id === rw.id);
+                  if (existingIdx >= 0 && wsMembersFromCloud.length > 0) {
+                    list[existingIdx] = {
+                      ...list[existingIdx],
+                      members: wsMembersFromCloud,
+                    };
+                  }
                 }
-              }
-            });
-            await WorkspaceRepository.saveWorkspaces(list);
+              });
+              await WorkspaceRepository.saveWorkspaces(list);
+            }
           }
         }
       } catch {}
     }
 
     setWorkspaces(list);
+
     // Prioriza o espaço padrão definido pelo usuário se ele existir na lista
-    const targetId = (savedDefaultId && list.some((w) => w.id === savedDefaultId)) ? savedDefaultId : activeId;
+    const savedDefaultId = await WorkspaceRepository.getDefaultWorkspaceId();
+    const effectiveDefaultId = savedDefaultId === 'ws-solo' ? personalWsId : savedDefaultId;
+    if (savedDefaultId === 'ws-solo') {
+      await WorkspaceRepository.setDefaultWorkspaceId(personalWsId);
+    }
+    setDefaultWorkspaceIdState(effectiveDefaultId);
+
+    const rawActiveId = (await WorkspaceRepository.getActiveWorkspaceId());
+    const effectiveActiveId = rawActiveId === 'ws-solo' ? personalWsId : rawActiveId;
+    const targetId = (effectiveDefaultId && list.some((w) => w.id === effectiveDefaultId))
+      ? effectiveDefaultId
+      : effectiveActiveId;
+
     const found = list.find((w) => w.id === targetId);
     if (found) {
       setActiveWorkspaceIdState(found.id);
@@ -385,7 +482,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     // Regra estrita: O espaço pessoal (solo) nunca pode ser excluído
-    if (target.id === 'ws-solo' || target.type === 'solo') {
+    const personalWsId = user?.id ? getPersonalWorkspaceId(user.id) : 'ws-solo';
+    if (target.id === 'ws-solo' || target.type === 'solo' || target.id === personalWsId) {
       return { success: false, message: 'O espaço pessoal não pode ser excluído.' };
     }
 
@@ -409,7 +507,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     // Se o espaço excluído era o ativo, muda para o espaço solo ou o primeiro restante
     if (activeWorkspaceId === workspaceId) {
-      const fallback = updated.find((w) => w.id === 'ws-solo') || updated[0];
+      const fallback = updated.find((w) => w.type === 'solo' || w.id === personalWsId) || updated[0];
       await setActiveWorkspace(fallback.id);
     }
 
@@ -441,7 +539,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, message: 'Espaço não encontrado.' };
     }
 
-    if (target.id === 'ws-solo' || target.type === 'solo') {
+    const personalWsId = user?.id ? getPersonalWorkspaceId(user.id) : 'ws-solo';
+    if (target.id === 'ws-solo' || target.type === 'solo' || target.id === personalWsId) {
       return { success: false, message: 'Você não pode sair do seu espaço pessoal.' };
     }
 
@@ -461,7 +560,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     // Remove localmente o espaço da lista do usuário convidado
     const updated = workspaces.filter((w) => w.id !== workspaceId);
     if (activeWorkspaceId === workspaceId) {
-      const fallback = updated.find((w) => w.id === 'ws-solo') || updated[0];
+      const fallback = updated.find((w) => w.type === 'solo' || w.id === personalWsId) || updated[0];
       await setActiveWorkspace(fallback.id);
     }
 

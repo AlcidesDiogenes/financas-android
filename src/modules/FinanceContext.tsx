@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWorkspace } from './workspaces/WorkspaceContext';
+import { useAuth } from '../services/auth/AuthContext';
 import { Transaction, MonthlySummary } from './transactions/types';
 import { TransactionRepository } from './transactions/repository';
 import { RecurringDebit, RecurringMonthRecord, isRecurringActiveInMonth } from './recurrings/types';
@@ -66,6 +67,7 @@ interface FinanceContextType {
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { user } = useAuth();
   const { activeWorkspace } = useWorkspace();
   const currentPeriod = useMemo(() => getCurrentMonthYear(), []);
 
@@ -137,7 +139,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   useEffect(() => {
     reloadAll();
-  }, []);
+  }, [user?.id, activeWorkspace?.id]);
 
   // Filter by active workspace
   const workspaceTransactions = useMemo(
@@ -304,6 +306,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ...tx,
       id: `tx-${Date.now()}`,
       workspaceId: activeWorkspace.id,
+      createdBy: tx.createdBy || user?.email || user?.name || 'Você',
       updatedAt: nowIso,
     };
     const updated = await TransactionRepository.add(newTx);
