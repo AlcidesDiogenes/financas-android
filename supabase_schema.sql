@@ -180,3 +180,20 @@ BEGIN
     DELETE FROM auth.users WHERE id = current_uid;
 END;
 $$;
+
+-- ==============================================================================
+-- 6. COLUNAS UPDATED_AT E ÍNDICES DE ALTA PERFORMANCE (ESCALABILIDADE E CONCORRÊNCIA)
+-- ==============================================================================
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE public.recurrings ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE public.recurring_month_records ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
+
+CREATE INDEX IF NOT EXISTS idx_transactions_workspace_date ON public.transactions(workspace_id, date DESC);
+CREATE INDEX IF NOT EXISTS idx_recurrings_workspace ON public.recurrings(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_recurring_month_records_workspace ON public.recurring_month_records(workspace_id, year, month);
+CREATE INDEX IF NOT EXISTS idx_budgets_workspace ON public.budgets(workspace_id, year, month);
+CREATE INDEX IF NOT EXISTS idx_goals_workspace ON public.goals(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_workspace_members_email ON public.workspace_members(email, workspace_id);
+

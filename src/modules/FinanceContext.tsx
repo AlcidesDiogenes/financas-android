@@ -299,10 +299,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const addTransaction = async (tx: Omit<Transaction, 'id' | 'workspaceId'>) => {
+    const nowIso = new Date().toISOString();
     const newTx: Transaction = {
       ...tx,
       id: `tx-${Date.now()}`,
       workspaceId: activeWorkspace.id,
+      updatedAt: nowIso,
     };
     const updated = await TransactionRepository.add(newTx);
     setAllTransactions(updated);
@@ -320,12 +322,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const addRecurring = async (
     rec: Omit<RecurringDebit, 'id' | 'workspaceId' | 'isPaidCurrentMonth' | 'createdAt'>
   ) => {
+    const nowIso = new Date().toISOString();
     const newRec: RecurringDebit = {
       ...rec,
       id: `rec-${Date.now()}`,
       workspaceId: activeWorkspace.id,
       isPaidCurrentMonth: false,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     const updated = await RecurringRepository.add(newRec);
     setAllRecurrings(updated);
@@ -334,9 +338,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateRecurring = async (rec: RecurringDebit) => {
-    const updated = await RecurringRepository.update(rec);
+    const withUpdate: RecurringDebit = {
+      ...rec,
+      updatedAt: new Date().toISOString(),
+    };
+    const updated = await RecurringRepository.update(withUpdate);
     setAllRecurrings(updated);
-    await CloudSyncService.autoUpsertRecurring(rec);
+    await CloudSyncService.autoUpsertRecurring(withUpdate);
   };
 
   const updateRecurringAmount = async (
@@ -470,6 +478,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   ) => {
     const existing = budgetId ? allBudgets.find((b) => b.id === budgetId) : undefined;
     const defaultStart = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const nowIso = new Date().toISOString();
 
     const newBudget: Budget = {
       id: budgetId || existing?.id || `bdg-${category}-${selectedMonth}-${selectedYear}`,
@@ -480,6 +489,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       year: selectedYear,
       startDate: startDate || existing?.startDate || defaultStart,
       endDate: endDate || existing?.endDate || undefined,
+      updatedAt: nowIso,
     };
     const updated = await BudgetRepository.addOrUpdate(newBudget);
     setAllBudgets(updated);
@@ -498,12 +508,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     goal: Omit<Goal, 'id' | 'workspaceId' | 'currentAmount' | 'createdAt'>,
     initialAmount = 0
   ) => {
+    const nowIso = new Date().toISOString();
     const newGoal: Goal = {
       ...goal,
       id: `goal-${Date.now()}`,
       workspaceId: activeWorkspace.id,
       currentAmount: initialAmount,
-      createdAt: new Date().toISOString(),
+      createdAt: nowIso,
+      updatedAt: nowIso,
     };
     const updated = await GoalRepository.add(newGoal);
     setAllGoals(updated);
@@ -512,9 +524,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateGoal = async (goal: Goal) => {
-    const updated = await GoalRepository.update(goal);
+    const withUpdate: Goal = {
+      ...goal,
+      updatedAt: new Date().toISOString(),
+    };
+    const updated = await GoalRepository.update(withUpdate);
     setAllGoals(updated);
-    await CloudSyncService.autoUpsertGoal(goal);
+    await CloudSyncService.autoUpsertGoal(withUpdate);
   };
 
   const depositGoal = async (id: string, amount: number, createTransaction: boolean = true) => {

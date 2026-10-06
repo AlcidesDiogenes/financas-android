@@ -28,12 +28,15 @@ import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
 import { Badge } from '../core/components/Badge';
-import { Input } from '../core/components/Input';
-import { ModalContainer } from '../core/components/ModalContainer';
 import { WhatsNewModal } from '../core/components/WhatsNewModal';
 import { APP_VERSION_CONFIG, getAppVersionString, RELEASE_HISTORY } from '../core/version';
 import { AuthScreen } from './AuthScreen';
 import { OnboardingScreen } from './OnboardingScreen';
+import { PreferencesSelectorModal, PreferenceModalType } from './settings/components/PreferencesSelectorModal';
+import { OTAUpdateModal } from './settings/components/OTAUpdateModal';
+import { ChangePasswordModal } from './settings/components/ChangePasswordModal';
+import { EditProfileModal } from './settings/components/EditProfileModal';
+import { TransferOwnershipModal, PendingWorkspaceTransfer } from './settings/components/TransferOwnershipModal';
 import { Ionicons } from '@expo/vector-icons';
 
 interface SettingsScreenProps {
@@ -42,15 +45,15 @@ interface SettingsScreenProps {
 
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWorkspaces }) => {
   const { theme, isDark, toggleTheme } = useTheme();
-  const { badgeStyle, setBadgeStyle } = useBottomBarBadge();
-  const { swipePayDirection, setSwipePayDirection } = useSwipeAction();
-  const { user, signOut, deleteAccount, updatePassword, updateProfile } = useAuth();
+  const { badgeStyle } = useBottomBarBadge();
+  const { swipePayDirection } = useSwipeAction();
+  const { user, signOut, deleteAccount } = useAuth();
   const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
-  const { transactions, selectedMonth, selectedYear, reloadAll, balanceMode, setBalanceMode } = useFinance();
+  const { transactions, selectedMonth, selectedYear, reloadAll, balanceMode } = useFinance();
 
   const [isSyncing, setIsSyncing] = useState(false);
-  const [activePrefModal, setActivePrefModal] = useState<'badge' | 'balance' | 'swipe' | null>(null);
+  const [activePrefModal, setActivePrefModal] = useState<PreferenceModalType>(null);
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false);
   const [statusMessage, setStatusMessage] = useState('');
   const [showAuthModal, setShowAuthModal] = useState(false);
@@ -65,104 +68,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [updateStatusText, setUpdateStatusText] = useState('');
   const [isReloadingApp, setIsReloadingApp] = useState(false);
 
-  // Modal para Alterar Senha com Confirmação da Senha Atual
+  // Modais de Senha, Perfil e Transferência
   const [showPasswordModal, setShowPasswordModal] = useState(false);
-  const [currentPassword, setCurrentPassword] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [passwordLoading, setPasswordLoading] = useState(false);
-  const [currentPasswordError, setCurrentPasswordError] = useState('');
-  const [newPasswordError, setNewPasswordError] = useState('');
-  const [confirmPasswordError, setConfirmPasswordError] = useState('');
-  const [passwordGeneralError, setPasswordGeneralError] = useState('');
-
-  // Modal para Editar Nome do Perfil
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [editedName, setEditedName] = useState('');
-  const [profileLoading, setProfileLoading] = useState(false);
-  const [profileError, setProfileError] = useState('');
-
-  // Modal para Transferência de Propriedade de Espaço ao Excluir Conta
   const [showTransferModal, setShowTransferModal] = useState(false);
-  const [pendingWsToTransfer, setPendingWsToTransfer] = useState<{
-    workspaceId: string;
-    workspaceName: string;
-    members: { name: string; email: string }[];
-  } | null>(null);
-  const [selectedNewOwnerEmail, setSelectedNewOwnerEmail] = useState('');
-
-  const handleUpdatePassword = async () => {
-    let hasErr = false;
-    if (!currentPassword) {
-      setCurrentPasswordError('Informe sua senha atual');
-      hasErr = true;
-    } else {
-      setCurrentPasswordError('');
-    }
-
-    if (!newPassword || newPassword.length < 6) {
-      setNewPasswordError('Mínimo de 6 caracteres');
-      hasErr = true;
-    } else {
-      setNewPasswordError('');
-    }
-
-    if (newPassword !== confirmPassword) {
-      setConfirmPasswordError('As senhas não coincidem');
-      hasErr = true;
-    } else {
-      setConfirmPasswordError('');
-    }
-
-    if (hasErr) return;
-
-    try {
-      setPasswordLoading(true);
-      setPasswordGeneralError('');
-      const res = await updatePassword(currentPassword, newPassword);
-      if (res.success) {
-        setShowPasswordModal(false);
-        setCurrentPassword('');
-        setNewPassword('');
-        setConfirmPassword('');
-        setCurrentPasswordError('');
-        setNewPasswordError('');
-        setConfirmPasswordError('');
-        setPasswordGeneralError('');
-        Alert.alert('Sucesso 🎉', 'Sua senha foi alterada com sucesso!');
-      } else {
-        setPasswordGeneralError(res.error || 'Não foi possível alterar a senha.');
-      }
-    } catch {
-      setPasswordGeneralError('Erro ao atualizar senha.');
-    } finally {
-      setPasswordLoading(false);
-    }
-  };
-
-  const handleUpdateProfile = async () => {
-    if (!editedName.trim()) {
-      setProfileError('Informe seu nome ou apelido');
-      return;
-    }
-
-    try {
-      setProfileLoading(true);
-      setProfileError('');
-      const res = await updateProfile(editedName.trim());
-      if (res.success) {
-        setShowProfileModal(false);
-        setProfileError('');
-        Alert.alert('Sucesso ✨', 'Seu nome de usuário foi atualizado com sucesso!');
-      } else {
-        setProfileError(res.error || 'Não foi possível atualizar o nome.');
-      }
-    } catch {
-      setProfileError('Erro ao atualizar nome.');
-    } finally {
-      setProfileLoading(false);
-    }
-  };
+  const [pendingWsToTransfer, setPendingWsToTransfer] = useState<PendingWorkspaceTransfer | null>(null);
 
   const handleManualSync = async () => {
     if (!user) {
@@ -406,7 +316,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         workspaceName: wsWithOtherMembers.name,
         members: otherMembers.map((m) => ({ name: m.name, email: m.email })),
       });
-      setSelectedNewOwnerEmail(otherMembers[0].email);
       setShowTransferModal(true);
       return;
     }
@@ -471,8 +380,6 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 activeOpacity={user ? 0.7 : 1}
                 onPress={() => {
                   if (user) {
-                    setEditedName(user.name);
-                    setProfileError('');
                     setShowProfileModal(true);
                   }
                 }}
@@ -495,11 +402,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             {user ? (
               <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, flexShrink: 0 }}>
                 <TouchableOpacity
-                  onPress={() => {
-                    setEditedName(user.name);
-                    setProfileError('');
-                    setShowProfileModal(true);
-                  }}
+                  onPress={() => setShowProfileModal(true)}
                   hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                   style={[styles.profileActionBtn, { backgroundColor: `${theme.primary}15` }]}
                 >
@@ -777,16 +680,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
               <TouchableOpacity
                 style={styles.cell}
                 activeOpacity={0.7}
-                onPress={() => {
-                  setCurrentPassword('');
-                  setNewPassword('');
-                  setConfirmPassword('');
-                  setCurrentPasswordError('');
-                  setNewPasswordError('');
-                  setConfirmPasswordError('');
-                  setPasswordGeneralError('');
-                  setShowPasswordModal(true);
-                }}
+                onPress={() => setShowPasswordModal(true)}
               >
                 <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}20` }]}>
                   <Ionicons name="key-outline" size={20} color={theme.primary} />
@@ -937,490 +831,63 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       </Modal>
 
       {/* Modal de Alterar Senha */}
-      <Modal
+      <ChangePasswordModal
         visible={showPasswordModal}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setShowPasswordModal(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setShowPasswordModal(false)}
-          />
-          <ScrollView
-            contentContainerStyle={styles.scrollModalContent}
-            keyboardShouldPersistTaps="handled"
-            bounces={false}
-          >
-            <View
-              style={[
-                styles.passwordModalCard,
-                { backgroundColor: theme.surface, borderColor: theme.border },
-              ]}
-            >
-              <View style={styles.passwordModalHeader}>
-                <View>
-                  <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
-                    Alterar Senha 🔒
-                  </Text>
-                  <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
-                    Cadastre sua nova senha de acesso
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setShowPasswordModal(false)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="close" size={22} color={theme.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <Input
-                label="Senha Atual"
-                placeholder="Digite sua senha atual"
-                secureTextEntry
-                value={currentPassword}
-                onChangeText={(val) => {
-                  setCurrentPassword(val);
-                  if (currentPasswordError) setCurrentPasswordError('');
-                  if (passwordGeneralError) setPasswordGeneralError('');
-                }}
-                error={currentPasswordError}
-              />
-
-              <Input
-                label="Nova Senha"
-                placeholder="Mínimo 6 caracteres"
-                secureTextEntry
-                value={newPassword}
-                onChangeText={(val) => {
-                  setNewPassword(val);
-                  if (newPasswordError) setNewPasswordError('');
-                  if (passwordGeneralError) setPasswordGeneralError('');
-                }}
-                error={newPasswordError}
-              />
-
-              <Input
-                label="Confirmar Nova Senha"
-                placeholder="Repita a nova senha"
-                secureTextEntry
-                value={confirmPassword}
-                onChangeText={(val) => {
-                  setConfirmPassword(val);
-                  if (confirmPasswordError) setConfirmPasswordError('');
-                  if (passwordGeneralError) setPasswordGeneralError('');
-                }}
-                error={confirmPasswordError}
-              />
-
-              {passwordGeneralError ? (
-                <View style={[styles.errorBox, { backgroundColor: theme.dangerLight }]}>
-                  <Ionicons name="alert-circle" size={16} color={theme.danger} />
-                  <Text style={[styles.errorText, { color: theme.danger }]}>
-                    {passwordGeneralError}
-                  </Text>
-                </View>
-              ) : null}
-
-              <View style={styles.passwordModalActions}>
-                <Button
-                  title="Cancelar"
-                  variant="outline"
-                  onPress={() => {
-                    setShowPasswordModal(false);
-                    setCurrentPassword('');
-                    setNewPassword('');
-                    setConfirmPassword('');
-                    setCurrentPasswordError('');
-                    setNewPasswordError('');
-                    setConfirmPasswordError('');
-                    setPasswordGeneralError('');
-                  }}
-                  style={{ flex: 1, marginRight: 8 }}
-                />
-                <Button
-                  title="Salvar Senha"
-                  loading={passwordLoading}
-                  onPress={handleUpdatePassword}
-                  style={{ flex: 1 }}
-                />
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
+        onClose={() => setShowPasswordModal(false)}
+      />
 
       {/* Modal de Editar Nome de Usuário */}
-      <Modal
+      <EditProfileModal
         visible={showProfileModal}
-        transparent
-        animationType="fade"
-        statusBarTranslucent
-        onRequestClose={() => setShowProfileModal(false)}
-      >
-        <KeyboardAvoidingView
-          behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
-          keyboardVerticalOffset={Platform.OS === 'ios' ? 0 : 20}
-          style={styles.modalOverlay}
-        >
-          <TouchableOpacity
-            style={StyleSheet.absoluteFill}
-            activeOpacity={1}
-            onPress={() => setShowProfileModal(false)}
-          />
-          <ScrollView
-            contentContainerStyle={styles.scrollModalContent}
-            keyboardShouldPersistTaps="handled"
-            bounces={false}
-          >
-            <View
-              style={[
-                styles.passwordModalCard,
-                { backgroundColor: theme.surface, borderColor: theme.border },
-              ]}
-            >
-              <View style={styles.passwordModalHeader}>
-                <View>
-                  <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
-                    Editar Perfil 👤
-                  </Text>
-                  <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
-                    Altere o nome exibido nos seus espaços e relatórios
-                  </Text>
-                </View>
-                <TouchableOpacity
-                  onPress={() => setShowProfileModal(false)}
-                  hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                >
-                  <Ionicons name="close" size={22} color={theme.textMuted} />
-                </TouchableOpacity>
-              </View>
-
-              <Input
-                label="Nome de Usuário"
-                placeholder="Digite seu nome completo ou apelido"
-                value={editedName}
-                onChangeText={(val) => {
-                  setEditedName(val);
-                  if (profileError) setProfileError('');
-                }}
-                autoCapitalize="words"
-                error={profileError}
-              />
-
-              <View style={styles.passwordModalActions}>
-                <Button
-                  title="Cancelar"
-                  variant="outline"
-                  onPress={() => {
-                    setShowProfileModal(false);
-                    setProfileError('');
-                  }}
-                  style={{ flex: 1, marginRight: 8 }}
-                />
-                <Button
-                  title="Salvar Nome"
-                  loading={profileLoading}
-                  onPress={handleUpdateProfile}
-                  style={{ flex: 1 }}
-                />
-              </View>
-            </View>
-          </ScrollView>
-        </KeyboardAvoidingView>
-      </Modal>
+        initialName={user?.name || ''}
+        onClose={() => setShowProfileModal(false)}
+      />
 
       {/* Modal de Transferência de Propriedade do Espaço */}
-      <Modal
+      <TransferOwnershipModal
         visible={showTransferModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => setShowTransferModal(false)}
-      >
-        <TouchableOpacity
-          style={styles.modalOverlay}
-          activeOpacity={1}
-          onPress={() => setShowTransferModal(false)}
-        >
-          <View
-            style={[
-              styles.passwordModalCard,
-              { backgroundColor: theme.surface, borderColor: theme.border },
-            ]}
-          >
-            <View style={styles.passwordModalHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.passwordModalTitle, { color: theme.text }]}>
-                  Transferir Espaço 👥
-                </Text>
-                <Text style={[styles.passwordModalSubtitle, { color: theme.textMuted }]}>
-                  Você é proprietário de "{pendingWsToTransfer?.workspaceName}". Deseja transferir a posse para outro membro antes de sair?
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setShowTransferModal(false)}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <Ionicons name="close" size={22} color={theme.textMuted} />
-              </TouchableOpacity>
-            </View>
-
-            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text, marginBottom: 8 }}>
-              Escolha o novo proprietário:
-            </Text>
-
-            <ScrollView style={{ maxHeight: 180, marginBottom: 14 }}>
-              {pendingWsToTransfer?.members.map((m) => {
-                const isSelected = selectedNewOwnerEmail === m.email;
-                return (
-                  <TouchableOpacity
-                    key={m.email}
-                    onPress={() => setSelectedNewOwnerEmail(m.email)}
-                    style={{
-                      flexDirection: 'row',
-                      alignItems: 'center',
-                      padding: 12,
-                      borderRadius: 10,
-                      borderWidth: 1,
-                      borderColor: isSelected ? theme.primary : theme.border,
-                      backgroundColor: isSelected ? `${theme.primary}15` : theme.background,
-                      marginBottom: 8,
-                    }}
-                  >
-                    <Ionicons
-                      name={isSelected ? 'radio-button-on' : 'radio-button-off'}
-                      size={20}
-                      color={isSelected ? theme.primary : theme.textMuted}
-                      style={{ marginRight: 10 }}
-                    />
-                    <View style={{ flex: 1 }}>
-                      <Text style={{ fontSize: 14, fontWeight: '600', color: theme.text }}>
-                        {m.name || m.email}
-                      </Text>
-                      <Text style={{ fontSize: 12, color: theme.textMuted }}>
-                        {m.email}
-                      </Text>
-                    </View>
-                  </TouchableOpacity>
-                );
-              })}
-            </ScrollView>
-
-            <View style={{ gap: 8 }}>
-              <Button
-                title="Transferir e Excluir Minha Conta"
-                variant="primary"
-                onPress={async () => {
-                  if (!pendingWsToTransfer || !selectedNewOwnerEmail) return;
-                  setShowTransferModal(false);
-                  try {
-                    setStatusMessage('Transferindo propriedade...');
-                    await transferOwnership(pendingWsToTransfer.workspaceId, selectedNewOwnerEmail);
-                    await executeFinalAccountDeletion();
-                  } catch {
-                    Alert.alert('Erro', 'Falha ao transferir propriedade.');
-                  } finally {
-                    setStatusMessage('');
-                  }
-                }}
-              />
-
-              <Button
-                title="Excluir Espaço Junto"
-                variant="danger"
-                onPress={() => {
-                  Alert.alert(
-                    'Excluir Espaço e Dados',
-                    `Tem certeza que deseja apagar o espaço "${pendingWsToTransfer?.workspaceName}" e todos os seus lançamentos? Os outros membros perderão o acesso.`,
-                    [
-                      { text: 'Cancelar', style: 'cancel' },
-                      {
-                        text: 'Sim, Excluir Tudo',
-                        style: 'destructive',
-                        onPress: async () => {
-                          if (!pendingWsToTransfer) return;
-                          setShowTransferModal(false);
-                          try {
-                            setStatusMessage('Excluindo espaço...');
-                            await deleteWorkspace(pendingWsToTransfer.workspaceId);
-                            await executeFinalAccountDeletion();
-                          } catch {
-                            Alert.alert('Erro', 'Falha ao excluir espaço.');
-                          } finally {
-                            setStatusMessage('');
-                          }
-                        },
-                      },
-                    ]
-                  );
-                }}
-              />
-
-              <Button
-                title="Cancelar"
-                variant="outline"
-                onPress={() => setShowTransferModal(false)}
-              />
-            </View>
-          </View>
-        </TouchableOpacity>
-      </Modal>
-
-      {/* MODAL DE ATUALIZAÇÃO ELEGANTE (UI/UX) */}
-      <Modal
-        visible={showUpdateModal}
-        transparent
-        animationType="fade"
-        onRequestClose={() => {
-          if (updateStep !== 'downloading') {
-            setShowUpdateModal(false);
+        pendingWorkspace={pendingWsToTransfer}
+        onClose={() => setShowTransferModal(false)}
+        onConfirmTransfer={async (newOwnerEmail) => {
+          if (!pendingWsToTransfer) return;
+          setShowTransferModal(false);
+          try {
+            setStatusMessage('Transferindo propriedade...');
+            await transferOwnership(pendingWsToTransfer.workspaceId, newOwnerEmail);
+            await executeFinalAccountDeletion();
+          } catch {
+            Alert.alert('Erro', 'Falha ao transferir propriedade.');
+          } finally {
+            setStatusMessage('');
           }
         }}
-      >
-        <View style={styles.modalOverlay}>
-          <View style={[styles.updateModalCard, { backgroundColor: theme.card, borderColor: theme.border }]}>
-            {/* Ícone e Cabeçalho */}
-            <View style={styles.updateIconWrapper}>
-              <View
-                style={[
-                  styles.updateIconCircle,
-                  {
-                    backgroundColor:
-                      updateStep === 'ready'
-                        ? '#E8F5E9'
-                        : updateStep === 'installing'
-                        ? '#EDE7F6'
-                        : updateStep === 'downloading'
-                        ? '#E3F2FD'
-                        : '#EDE7F6',
-                  },
-                ]}
-              >
-                <Ionicons
-                  name={
-                    updateStep === 'ready'
-                      ? 'checkmark-circle'
-                      : updateStep === 'installing'
-                      ? 'construct'
-                      : updateStep === 'downloading'
-                      ? 'cloud-download'
-                      : 'rocket'
-                  }
-                  size={36}
-                  color={
-                    updateStep === 'ready'
-                      ? '#2E7D32'
-                      : updateStep === 'installing'
-                      ? '#673AB7'
-                      : updateStep === 'downloading'
-                      ? theme.primary
-                      : '#673AB7'
-                  }
-                />
-              </View>
-            </View>
+        onDeleteWorkspace={async () => {
+          if (!pendingWsToTransfer) return;
+          setShowTransferModal(false);
+          try {
+            setStatusMessage('Excluindo espaço...');
+            await deleteWorkspace(pendingWsToTransfer.workspaceId);
+            await executeFinalAccountDeletion();
+          } catch {
+            Alert.alert('Erro', 'Falha ao excluir espaço.');
+          } finally {
+            setStatusMessage('');
+          }
+        }}
+      />
 
-            <Text style={[styles.updateModalTitle, { color: theme.text }]}>
-              {updateStep === 'ready'
-                ? 'Atualização Pronta!'
-                : updateStep === 'installing'
-                ? 'Instalando Atualização...'
-                : updateStep === 'downloading'
-                ? 'Baixando Arquivos...'
-                : 'Nova Versão Disponível! 🎉'}
-            </Text>
-
-            <Text style={[styles.updateModalSubtitle, { color: theme.textMuted }]}>
-              {updateStep === 'ready'
-                ? 'Os novos arquivos foram instalados. Reinicie o aplicativo para ver as novidades imediatamente.'
-                : updateStep === 'installing' || updateStep === 'downloading'
-                ? updateStatusText
-                : 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'}
-            </Text>
-
-            {/* BARRA DE PROGRESSO VISUAL */}
-            {(updateStep === 'downloading' || updateStep === 'installing') && (
-              <View style={styles.progressContainer}>
-                <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#333' : '#E0E0E0' }]}>
-                  <View
-                    style={[
-                      styles.progressBarFill,
-                      {
-                        width: `${updateDownloadProgress}%`,
-                        backgroundColor: updateStep === 'installing' ? '#673AB7' : theme.primary,
-                      },
-                    ]}
-                  />
-                </View>
-
-                <View style={styles.progressTextRow}>
-                  <Text style={[styles.progressPercent, { color: updateStep === 'installing' ? '#673AB7' : theme.primary }]}>
-                    {updateDownloadProgress}%
-                  </Text>
-                  <ActivityIndicator size="small" color={updateStep === 'installing' ? '#673AB7' : theme.primary} />
-                </View>
-
-                {/* Dica amigável para não interromper */}
-                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#262626' : '#F3F4F6', padding: 8, borderRadius: 8, marginTop: 10 }}>
-                  <Ionicons name="information-circle-outline" size={15} color={theme.textMuted} style={{ marginRight: 6 }} />
-                  <Text style={{ fontSize: 11, color: theme.textMuted, flex: 1 }}>
-                    Mantenha o app em primeiro plano para concluir mais rápido.
-                  </Text>
-                </View>
-              </View>
-            )}
-
-            {/* AÇÕES DE BOTÕES */}
-            <View style={styles.updateModalActions}>
-              {updateStep === 'available' && (
-                <>
-                  <Button
-                    title="Atualizar Agora"
-                    onPress={handleStartUpdateDownload}
-                    style={{ flex: 1, marginRight: 8 }}
-                  />
-                  <Button
-                    title="Mais Tarde"
-                    variant="outline"
-                    onPress={() => setShowUpdateModal(false)}
-                    style={{ flex: 1 }}
-                  />
-                </>
-              )}
-
-              {updateStep === 'ready' && (
-                <Button
-                  title="Reiniciar Aplicativo Agora 🚀"
-                  onPress={handleRelaunchApp}
-                  style={{ width: '100%' }}
-                />
-              )}
-            </View>
-          </View>
-        </View>
-      </Modal>
-
-      {/* OVERLAY DE TRANSIÇÃO SUAVE DE REINÍCIO (SPLASH) */}
-      {isReloadingApp && (
-        <View style={[styles.relaunchSplashOverlay, { backgroundColor: theme.background }]}>
-          <View style={[styles.relaunchLogoCircle, { backgroundColor: theme.primary }]}>
-            <Ionicons name="wallet" size={44} color="#FFF" />
-          </View>
-          <Text style={[styles.relaunchTitle, { color: theme.text }]}>Finanças</Text>
-          <Text style={[styles.relaunchSubtitle, { color: theme.textMuted }]}>
-            Aplicando atualizações e reiniciando...
-          </Text>
-          <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 24 }} />
-        </View>
-      )}
+      {/* MODAL DE ATUALIZAÇÃO ELEGANTE (UI/UX) */}
+      <OTAUpdateModal
+        visible={showUpdateModal}
+        step={updateStep}
+        stage={updateStage}
+        downloadProgress={updateDownloadProgress}
+        statusText={updateStatusText}
+        isReloadingApp={isReloadingApp}
+        onStartUpdate={handleStartUpdateDownload}
+        onRestartApp={handleRelaunchApp}
+        onClose={() => setShowUpdateModal(false)}
+      />
 
       {/* MODAL DE HISTÓRICO DE NOVIDADES */}
       <WhatsNewModal
@@ -1431,234 +898,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       />
 
       {/* MODAL SELETOR DE PREFERÊNCIAS */}
-      <ModalContainer
+      <PreferencesSelectorModal
         visible={!!activePrefModal}
+        activeType={activePrefModal}
         onClose={() => setActivePrefModal(null)}
-        title={
-          activePrefModal === 'badge'
-            ? 'Avisos na Barra Inferior'
-            : activePrefModal === 'balance'
-            ? 'Cálculo do Saldo Principal'
-            : 'Gesto ao Deslizar nas Contas'
-        }
-      >
-        {activePrefModal === 'badge' && (
-          <View style={{ gap: 12 }}>
-            <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 4 }}>
-              Escolha como deseja visualizar os alertas no menu inferior:
-            </Text>
-            {/* Number */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setBadgeStyle('number');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: badgeStyle === 'number' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: badgeStyle === 'number' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#EF444418' }]}>
-                <View style={{ minWidth: 20, height: 20, borderRadius: 10, backgroundColor: '#EF4444', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 4 }}>
-                  <Text style={{ color: '#FFF', fontSize: 11, fontWeight: '800' }}>3</Text>
-                </View>
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Contador Numérico</Text>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  Exibe a quantidade exata de pendências com um badge vermelho.
-                </Text>
-              </View>
-              {badgeStyle === 'number' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-
-            {/* Dot */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setBadgeStyle('dot');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: badgeStyle === 'dot' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: badgeStyle === 'dot' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#EF444418' }]}>
-                <View style={{ width: 12, height: 12, borderRadius: 6, backgroundColor: '#EF4444' }} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Indicador Discreto (Bolinha)</Text>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  Mostra um ponto vermelho sutil para avisar pendências.
-                </Text>
-              </View>
-              {badgeStyle === 'dot' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-
-            {/* None */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setBadgeStyle('none');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: badgeStyle === 'none' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: badgeStyle === 'none' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: `${theme.textMuted}18` }]}>
-                <Ionicons name="eye-off-outline" size={20} color={theme.textMuted} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Ocultar Avisos</Text>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  Mantém a barra inferior completamente limpa, sem avisos.
-                </Text>
-              </View>
-              {badgeStyle === 'none' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {activePrefModal === 'balance' && (
-          <View style={{ gap: 12 }}>
-            <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 4 }}>
-              Defina como o card principal de saldo deve operar por padrão:
-            </Text>
-            {/* Projected */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setBalanceMode('projected');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: balanceMode === 'projected' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: balanceMode === 'projected' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: `${theme.primary}20` }]}>
-                <Ionicons name="calculator-outline" size={22} color={theme.primary} />
-              </View>
-              <View style={{ flex: 1 }}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 2 }}>
-                  <Text style={[styles.prefOptionTitle, { color: theme.text, marginBottom: 0 }]}>Previsto Total</Text>
-                  <Badge label="Recomendado" variant="primary" size="sm" />
-                </View>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  Já contempla todas as receitas e despesas fixas previstas do mês.
-                </Text>
-              </View>
-              {balanceMode === 'projected' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-
-            {/* Realized */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setBalanceMode('realized');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: balanceMode === 'realized' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: balanceMode === 'realized' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#10B98120' }]}>
-                <Ionicons name="cash-outline" size={22} color="#10B981" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Real de Caixa</Text>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  Altera somente quando transações são registradas ou contas são quitadas.
-                </Text>
-              </View>
-              {balanceMode === 'realized' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {activePrefModal === 'swipe' && (
-          <View style={{ gap: 12 }}>
-            <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 4 }}>
-              Escolha a direção do gesto ao deslizar os cards de contas:
-            </Text>
-            {/* Right */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setSwipePayDirection('right');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: swipePayDirection === 'right' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: swipePayDirection === 'right' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#10B98120' }]}>
-                <Ionicons name="arrow-forward" size={20} color="#10B981" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Padrão</Text>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  👉 Deslizar para Direita: Marcar Pago / Recebido{'\n'}
-                  👈 Deslizar para Esquerda: Excluir Conta
-                </Text>
-              </View>
-              {swipePayDirection === 'right' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-
-            {/* Left */}
-            <TouchableOpacity
-              activeOpacity={0.7}
-              onPress={async () => {
-                await setSwipePayDirection('left');
-                setActivePrefModal(null);
-              }}
-              style={[
-                styles.prefOptionCard,
-                {
-                  backgroundColor: swipePayDirection === 'left' ? `${theme.primary}12` : theme.surfaceVariant,
-                  borderColor: swipePayDirection === 'left' ? theme.primary : theme.border,
-                },
-              ]}
-            >
-              <View style={[styles.prefOptionIconWrap, { backgroundColor: '#3B82F620' }]}>
-                <Ionicons name="arrow-back" size={20} color="#3B82F6" />
-              </View>
-              <View style={{ flex: 1 }}>
-                <Text style={[styles.prefOptionTitle, { color: theme.text }]}>Invertido</Text>
-                <Text style={[styles.prefOptionDesc, { color: theme.textMuted }]}>
-                  👈 Deslizar para Esquerda: Marcar Pago / Recebido{'\n'}
-                  👉 Deslizar para Direita: Excluir Conta
-                </Text>
-              </View>
-              {swipePayDirection === 'left' && <Ionicons name="checkmark-circle" size={22} color={theme.primary} />}
-            </TouchableOpacity>
-          </View>
-        )}
-      </ModalContainer>
+      />
     </View>
   );
 };
@@ -1794,199 +1038,11 @@ const styles = StyleSheet.create({
   cellColumn: {
     paddingVertical: 4,
   },
-  badgeOptionRow: {
-    flexDirection: 'row',
-    gap: 8,
-    marginTop: 2,
-    marginBottom: 8,
-    paddingLeft: 48,
-  },
-  badgeOptionBtn: {
-    flex: 1,
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 1.5,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  badgeOptionContent: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 5,
-  },
-  badgeOptionLabel: {
-    fontSize: 12,
-  },
-  previewBadgeNum: {
-    minWidth: 14,
-    height: 14,
-    borderRadius: 7,
-    alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 3,
-  },
-  previewBadgeNumText: {
-    color: '#FFF',
-    fontSize: 8,
-    fontWeight: '800',
-    lineHeight: 10,
-  },
-  previewBadgeDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-  },
   syncBtn: {
     width: 34,
     height: 34,
     borderRadius: 17,
     alignItems: 'center',
     justifyContent: 'center',
-  },
-  modalOverlay: {
-    flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.5)',
-    justifyContent: 'center',
-    padding: 20,
-  },
-  scrollModalContent: {
-    flexGrow: 1,
-    justifyContent: 'center',
-  },
-  passwordModalCard: {
-    borderRadius: 20,
-    borderWidth: 1,
-    padding: 20,
-    elevation: 10,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 6 },
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-  },
-  passwordModalHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
-  },
-  passwordModalTitle: {
-    fontSize: 18,
-    fontWeight: '800',
-  },
-  passwordModalSubtitle: {
-    fontSize: 12,
-    marginTop: 2,
-  },
-  passwordModalActions: {
-    flexDirection: 'row',
-    marginTop: 18,
-  },
-  errorBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 8,
-    marginTop: 8,
-  },
-  errorText: {
-    fontSize: 12,
-    fontWeight: '600',
-    marginLeft: 6,
-    flex: 1,
-  },
-  // ESTILOS DO MODAL DE ATUALIZAÇÃO (UI/UX)
-  updateModalCard: {
-    borderRadius: 24,
-    borderWidth: 1,
-    padding: 24,
-    elevation: 12,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.25,
-    shadowRadius: 16,
-    alignItems: 'center',
-  },
-  updateIconWrapper: {
-    marginBottom: 14,
-  },
-  updateIconCircle: {
-    width: 68,
-    height: 68,
-    borderRadius: 34,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  updateModalTitle: {
-    fontSize: 20,
-    fontWeight: '800',
-    textAlign: 'center',
-    marginBottom: 8,
-  },
-  updateModalSubtitle: {
-    fontSize: 13,
-    lineHeight: 19,
-    textAlign: 'center',
-    marginBottom: 20,
-    paddingHorizontal: 8,
-  },
-  progressContainer: {
-    width: '100%',
-    marginBottom: 20,
-  },
-  progressBarBg: {
-    width: '100%',
-    height: 10,
-    borderRadius: 5,
-    overflow: 'hidden',
-    marginBottom: 8,
-  },
-  progressBarFill: {
-    height: '100%',
-    borderRadius: 5,
-  },
-  progressTextRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingHorizontal: 2,
-  },
-  progressPercent: {
-    fontSize: 13,
-    fontWeight: '700',
-  },
-  updateModalActions: {
-    flexDirection: 'row',
-    width: '100%',
-    marginTop: 6,
-  },
-  // ESTILOS DA TRANSIÇÃO DE REINÍCIO (SPLASH OVERLAY)
-  relaunchSplashOverlay: {
-    ...StyleSheet.absoluteFill,
-    zIndex: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  relaunchLogoCircle: {
-    width: 88,
-    height: 88,
-    borderRadius: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-    marginBottom: 16,
-    elevation: 8,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-  },
-  relaunchTitle: {
-    fontSize: 24,
-    fontWeight: '800',
-    letterSpacing: 0.5,
-  },
-  relaunchSubtitle: {
-    fontSize: 13,
-    marginTop: 6,
   },
 });

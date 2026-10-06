@@ -13,8 +13,8 @@ export interface ReleaseNote {
 }
 
 export const APP_VERSION_CONFIG = {
-  version: '1.3.8',
-  buildNumber: 14,
+  version: '1.3.9',
+  buildNumber: 15,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -25,6 +25,30 @@ export const getAppVersionString = (): string => {
 };
 
 export const RELEASE_HISTORY: ReleaseNote[] = [
+  {
+    version: '1.3.9',
+    buildNumber: 15,
+    date: '06/10/2026',
+    title: 'Arquitetura Robusta & Alta Performance 🚀',
+    highlight: 'Sincronização inteligente com resolução de conflitos (Last-Write-Wins), desacoplamento de modais e índices de alta escala.',
+    changes: [
+      {
+        icon: 'sync-circle-outline',
+        title: 'Reconciliação Inteligente Nuvem / Local',
+        description: 'Chega de sobrescrita cega! O app agora sincroniza dados comparando carimbos de atualização (timestamps), garantindo que edições offline ou simultâneas nunca sejam perdidas.',
+      },
+      {
+        icon: 'layers-outline',
+        title: 'Modularização e Desempenho Visual',
+        description: 'Telas grandes e modais complexos foram modularizados em componentes independentes, tornando a navegação mais fluida e reduzindo o consumo de memória.',
+      },
+      {
+        icon: 'speedometer-outline',
+        title: 'Pronto para Anos de Dados',
+        description: 'Consultas com limites de segurança e índices compostos de alta performance no banco para navegação instantânea em históricos com milhares de lançamentos.',
+      },
+    ],
+  },
   {
     version: '1.3.8',
     buildNumber: 14,

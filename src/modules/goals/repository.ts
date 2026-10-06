@@ -68,15 +68,23 @@ export class GoalRepository {
   }
 
   static async add(goal: Goal): Promise<Goal[]> {
+    const item: Goal = {
+      ...goal,
+      updatedAt: goal.updatedAt || new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const updated = [goal, ...all];
+    const updated = [item, ...all.filter((g) => g.id !== item.id)];
     await this.saveAll(updated);
     return updated;
   }
 
   static async update(goal: Goal): Promise<Goal[]> {
+    const item: Goal = {
+      ...goal,
+      updatedAt: new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const updated = all.map((g) => (g.id === goal.id ? goal : g));
+    const updated = all.map((g) => (g.id === item.id ? item : g));
     await this.saveAll(updated);
     return updated;
   }
@@ -84,7 +92,7 @@ export class GoalRepository {
   static async deposit(id: string, amount: number): Promise<Goal[]> {
     const all = await this.getAll();
     const updated = all.map((g) =>
-      g.id === id ? { ...g, currentAmount: g.currentAmount + amount } : g
+      g.id === id ? { ...g, currentAmount: g.currentAmount + amount, updatedAt: new Date().toISOString() } : g
     );
     await this.saveAll(updated);
     return updated;
@@ -93,7 +101,7 @@ export class GoalRepository {
   static async withdraw(id: string, amount: number): Promise<Goal[]> {
     const all = await this.getAll();
     const updated = all.map((g) =>
-      g.id === id ? { ...g, currentAmount: Math.max(0, g.currentAmount - amount) } : g
+      g.id === id ? { ...g, currentAmount: Math.max(0, g.currentAmount - amount), updatedAt: new Date().toISOString() } : g
     );
     await this.saveAll(updated);
     return updated;

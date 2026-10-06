@@ -27,19 +27,23 @@ export class BudgetRepository {
   }
 
   static async addOrUpdate(budget: Budget): Promise<Budget[]> {
+    const item: Budget = {
+      ...budget,
+      updatedAt: new Date().toISOString(),
+    };
     const all = await this.getAll();
     const existingIndex = all.findIndex(
       (b) =>
-        b.id === budget.id ||
-        (b.workspaceId === budget.workspaceId && b.category === budget.category)
+        b.id === item.id ||
+        (b.workspaceId === item.workspaceId && b.category === item.category)
     );
 
     let updated: Budget[];
     if (existingIndex >= 0) {
       updated = [...all];
-      updated[existingIndex] = budget;
+      updated[existingIndex] = item;
     } else {
-      updated = [budget, ...all];
+      updated = [item, ...all];
     }
 
     await this.saveAll(updated);

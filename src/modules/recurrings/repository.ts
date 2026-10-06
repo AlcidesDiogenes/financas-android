@@ -27,8 +27,12 @@ export class RecurringRepository {
   }
 
   static async add(item: RecurringDebit): Promise<RecurringDebit[]> {
+    const rec: RecurringDebit = {
+      ...item,
+      updatedAt: item.updatedAt || new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const updated = [item, ...all];
+    const updated = [rec, ...all.filter((r) => r.id !== rec.id)];
     await this.saveAll(updated);
     return updated;
   }
@@ -36,7 +40,7 @@ export class RecurringRepository {
   static async togglePaid(id: string): Promise<RecurringDebit[]> {
     const all = await this.getAll();
     const updated = all.map((r) =>
-      r.id === id ? { ...r, isPaidCurrentMonth: !r.isPaidCurrentMonth } : r
+      r.id === id ? { ...r, isPaidCurrentMonth: !r.isPaidCurrentMonth, updatedAt: new Date().toISOString() } : r
     );
     await this.saveAll(updated);
     return updated;
@@ -45,15 +49,19 @@ export class RecurringRepository {
   static async updateAmount(id: string, newAmount: number): Promise<RecurringDebit[]> {
     const all = await this.getAll();
     const updated = all.map((r) =>
-      r.id === id ? { ...r, amount: newAmount } : r
+      r.id === id ? { ...r, amount: newAmount, updatedAt: new Date().toISOString() } : r
     );
     await this.saveAll(updated);
     return updated;
   }
 
   static async update(item: RecurringDebit): Promise<RecurringDebit[]> {
+    const rec: RecurringDebit = {
+      ...item,
+      updatedAt: new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const updated = all.map((r) => (r.id === item.id ? item : r));
+    const updated = all.map((r) => (r.id === rec.id ? rec : r));
     await this.saveAll(updated);
     return updated;
   }

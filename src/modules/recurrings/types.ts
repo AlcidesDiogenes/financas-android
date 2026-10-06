@@ -19,6 +19,7 @@ export interface RecurringDebit {
   createdAt: string;
   startDate?: string; // YYYY-MM (ex: '2026-01')
   endDate?: string;   // YYYY-MM (ex: '2026-12')
+  updatedAt?: string;
 }
 
 export interface RecurringMonthRecord {
@@ -31,6 +32,7 @@ export interface RecurringMonthRecord {
   isPaid: boolean;
   paidAt?: string;
   transactionId?: string;
+  updatedAt?: string;
 }
 
 export const isRecurringActiveInMonth = (

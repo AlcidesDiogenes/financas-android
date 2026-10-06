@@ -9,6 +9,7 @@ export interface Budget {
   year: number;
   startDate?: string; // YYYY-MM
   endDate?: string;   // YYYY-MM
+  updatedAt?: string;
 }
 
 export interface BudgetProgress {

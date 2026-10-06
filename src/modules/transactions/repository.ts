@@ -27,15 +27,23 @@ export class TransactionRepository {
   }
 
   static async add(transaction: Transaction): Promise<Transaction[]> {
+    const item: Transaction = {
+      ...transaction,
+      updatedAt: transaction.updatedAt || new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const updated = [transaction, ...all];
+    const updated = [item, ...all.filter((t) => t.id !== item.id)];
     await this.saveAll(updated);
     return updated;
   }
 
   static async update(transaction: Transaction): Promise<Transaction[]> {
+    const item: Transaction = {
+      ...transaction,
+      updatedAt: new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const updated = all.map((t) => (t.id === transaction.id ? transaction : t));
+    const updated = all.map((t) => (t.id === item.id ? item : t));
     await this.saveAll(updated);
     return updated;
   }

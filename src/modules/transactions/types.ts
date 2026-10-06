@@ -26,6 +26,7 @@ export interface Transaction {
   createdBy?: string;
   assignedTo?: string; // member name in shared workspace
   isRecurringGenerated?: boolean;
+  updatedAt?: string; // ISO date timestamp for concurrency resolution
 }
 
 export interface MonthlySummary {

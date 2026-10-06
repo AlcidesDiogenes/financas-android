@@ -19,15 +19,19 @@ export class RecurringMonthRepository {
   }
 
   static async upsert(record: RecurringMonthRecord): Promise<RecurringMonthRecord[]> {
+    const item: RecurringMonthRecord = {
+      ...record,
+      updatedAt: record.updatedAt || new Date().toISOString(),
+    };
     const all = await this.getAll();
-    const existingIndex = all.findIndex((r) => r.id === record.id);
+    const existingIndex = all.findIndex((r) => r.id === item.id);
     let updated: RecurringMonthRecord[];
 
     if (existingIndex >= 0) {
       updated = [...all];
-      updated[existingIndex] = { ...updated[existingIndex], ...record };
+      updated[existingIndex] = { ...updated[existingIndex], ...item, updatedAt: new Date().toISOString() };
     } else {
-      updated = [record, ...all];
+      updated = [item, ...all];
     }
 
     await this.saveAll(updated);

@@ -9,6 +9,7 @@ export interface Goal {
   color: string;
   notes?: string;
   createdAt: string;
+  updatedAt?: string;
 }
 
 export interface GoalProgress {
