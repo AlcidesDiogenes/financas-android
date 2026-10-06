@@ -5,6 +5,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { ThemeProvider, useTheme } from './src/core/theme/ThemeContext';
 import { PrivacyProvider } from './src/core/theme/PrivacyContext';
 import { BottomBarBadgeProvider } from './src/core/theme/BottomBarBadgeContext';
+import { SwipeActionProvider } from './src/core/theme/SwipeActionContext';
 import { AuthProvider, useAuth } from './src/services/auth/AuthContext';
 import { SecurityProvider } from './src/services/security/SecurityContext';
 import { WorkspaceProvider } from './src/modules/workspaces/WorkspaceContext';
@@ -152,11 +153,13 @@ export default function App() {
       <ThemeProvider>
         <PrivacyProvider>
           <BottomBarBadgeProvider>
-            <AuthProvider>
-              <SecurityProvider>
-                <ThemedApp />
-              </SecurityProvider>
-            </AuthProvider>
+            <SwipeActionProvider>
+              <AuthProvider>
+                <SecurityProvider>
+                  <ThemedApp />
+                </SecurityProvider>
+              </AuthProvider>
+            </SwipeActionProvider>
           </BottomBarBadgeProvider>
         </PrivacyProvider>
       </ThemeProvider>

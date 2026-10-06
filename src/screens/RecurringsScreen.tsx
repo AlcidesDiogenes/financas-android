@@ -257,6 +257,7 @@ export const RecurringsScreen: React.FC = () => {
           setModalVisible(false);
           setFullEditItem(null);
         }}
+        onDelete={deleteRecurring}
       />
 
       {/* Modal Ajuste Rápido de Valor */}

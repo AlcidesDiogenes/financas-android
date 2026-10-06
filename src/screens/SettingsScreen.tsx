@@ -17,6 +17,7 @@ import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../core/theme/ThemeContext';
 import { useBottomBarBadge, BottomBarBadgeStyle } from '../core/theme/BottomBarBadgeContext';
+import { useSwipeAction, SwipePayDirection } from '../core/theme/SwipeActionContext';
 import { useAuth } from '../services/auth/AuthContext';
 import { useSecurity } from '../services/security/SecurityContext';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
@@ -41,6 +42,7 @@ interface SettingsScreenProps {
 export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWorkspaces }) => {
   const { theme, isDark, toggleTheme } = useTheme();
   const { badgeStyle, setBadgeStyle } = useBottomBarBadge();
+  const { swipePayDirection, setSwipePayDirection } = useSwipeAction();
   const { user, signOut, deleteAccount, updatePassword, updateProfile } = useAuth();
   const { activeWorkspace, workspaces, transferOwnership, deleteWorkspace } = useWorkspace();
   const { isBiometricsEnabled, isHardwareSupported, toggleBiometrics } = useSecurity();
@@ -783,6 +785,71 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                   <TouchableOpacity
                     key={opt.id}
                     onPress={() => setBalanceMode(opt.id as any)}
+                    activeOpacity={0.7}
+                    style={[
+                      styles.badgeOptionBtn,
+                      {
+                        backgroundColor: isSelected ? `${theme.primary}15` : theme.surfaceVariant,
+                        borderColor: isSelected ? theme.primary : theme.border,
+                      },
+                    ]}
+                  >
+                    <View style={styles.badgeOptionContent}>
+                      <Ionicons
+                        name={opt.icon as any}
+                        size={15}
+                        color={isSelected ? theme.primary : theme.textMuted}
+                      />
+                      <Text
+                        style={[
+                          styles.badgeOptionLabel,
+                          {
+                            color: isSelected ? theme.primary : theme.text,
+                            fontWeight: isSelected ? '700' : '500',
+                          },
+                        ]}
+                      >
+                        {opt.label}
+                      </Text>
+                    </View>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+          </View>
+
+          <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
+
+          {/* Gestos ao Deslizar nas Contas (Swipe) */}
+          <View style={styles.cellColumn}>
+            <View style={styles.cell}>
+              <View style={[styles.cellIconWrap, { backgroundColor: `${theme.primary}20` }]}>
+                <Ionicons name="swap-horizontal-outline" size={20} color={theme.primary} />
+              </View>
+              <View style={styles.cellTextWrap}>
+                <Text style={[styles.cellTitle, { color: theme.text }]}>
+                  Lados ao Deslizar nas Contas
+                </Text>
+                <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                  {swipePayDirection === 'right'
+                    ? '👉 Direita: Marcar Pago • 👈 Esquerda: Excluir'
+                    : '👈 Esquerda: Marcar Pago • 👉 Direita: Excluir'}
+                </Text>
+              </View>
+            </View>
+
+            <View style={styles.badgeOptionRow}>
+              {(
+                [
+                  { id: 'right', label: 'Padrão (👉 Pagar)', icon: 'arrow-forward-circle-outline' },
+                  { id: 'left', label: 'Invertido (👈 Pagar)', icon: 'arrow-back-circle-outline' },
+                ] as const
+              ).map((opt) => {
+                const isSelected = swipePayDirection === opt.id;
+                return (
+                  <TouchableOpacity
+                    key={opt.id}
+                    onPress={() => setSwipePayDirection(opt.id as SwipePayDirection)}
                     activeOpacity={0.7}
                     style={[
                       styles.badgeOptionBtn,

@@ -14,7 +14,7 @@ export interface ReleaseNote {
 
 export const APP_VERSION_CONFIG = {
   version: '1.3.7',
-  buildNumber: 12,
+  buildNumber: 13,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -27,15 +27,25 @@ export const getAppVersionString = (): string => {
 export const RELEASE_HISTORY: ReleaseNote[] = [
   {
     version: '1.3.7',
-    buildNumber: 12,
+    buildNumber: 13,
     date: '06/10/2026',
-    title: 'Ajuste de Modais com Teclado e Gestão Visual ✨',
-    highlight: 'Eliminação de vão entre teclado e modal, tela de fundo 100% protegida e novo modal de membros.',
+    title: 'Ações por Deslize (Swipe) e Exclusão Segura ✨',
+    highlight: 'Deslize para marcar como pago ou excluir, inversão de lados nos ajustes e fim de cliques acidentais.',
     changes: [
       {
-        icon: 'key-outline',
-        title: 'Fim do Vão do Teclado nos Modais',
-        description: 'Eliminado o espaçamento indesejado abaixo dos formulários ao abrir o teclado. O modal agora encosta perfeitamente no teclado com fundo 100% protegido.',
+        icon: 'swap-horizontal-outline',
+        title: 'Deslizar para Pagar ou Excluir',
+        description: 'Deslize o item da conta para os lados para marcar como pago/recebido rapidamente ou excluir com confirmação.',
+      },
+      {
+        icon: 'options-outline',
+        title: 'Inversão de Lados nos Ajustes',
+        description: 'Escolha em Ajustes qual lado você prefere para dar baixa nas contas e qual lado prefere para exclusão.',
+      },
+      {
+        icon: 'shield-checkmark-outline',
+        title: 'Proteção contra Exclusão Acidental',
+        description: 'O botão de lixeira foi removido da lista principal e alocado com destaque seguro dentro do formulário de edição.',
       },
       {
         icon: 'people-outline',

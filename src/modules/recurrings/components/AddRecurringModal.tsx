@@ -5,6 +5,7 @@ import {
   StyleSheet,
   TouchableOpacity,
   ScrollView,
+  Alert,
 } from 'react-native';
 import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
@@ -38,6 +39,7 @@ interface AddRecurringModalProps {
     startDate?: string;
     endDate?: string;
   }) => void;
+  onDelete?: (id: string) => void;
 }
 
 const EXPENSE_CATEGORIES: TransactionCategory[] = [
@@ -63,6 +65,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
   initialData,
   onClose,
   onSubmit,
+  onDelete,
 }) => {
   const { theme } = useTheme();
   const { activeWorkspace } = useWorkspace();
@@ -211,6 +214,25 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
     });
 
     onClose();
+  };
+
+  const handleConfirmDelete = () => {
+    if (!initialData || !onDelete) return;
+    Alert.alert(
+      'Excluir Conta Recorrente?',
+      `Deseja realmente excluir "${initialData.title}"?\n\nEsta conta não aparecerá mais nos meses futuros e passados.`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Excluir',
+          style: 'destructive',
+          onPress: () => {
+            onDelete(initialData.id);
+            onClose();
+          },
+        },
+      ]
+    );
   };
 
   const isShared = activeWorkspace.type === 'shared';
@@ -461,6 +483,16 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         onPress={handleSave}
         style={{ marginTop: 8 }}
       />
+
+      {initialData && onDelete && (
+        <Button
+          title={type === 'income' ? 'Excluir Provento / Renda' : 'Excluir Conta Recorrente'}
+          variant="danger"
+          icon={<Ionicons name="trash-outline" size={17} color="#FFF" />}
+          onPress={handleConfirmDelete}
+          style={{ marginTop: 12 }}
+        />
+      )}
     </ModalContainer>
   );
 };
