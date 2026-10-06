@@ -3,6 +3,7 @@ import { Workspace } from './types';
 
 const WORKSPACES_STORAGE_KEY = '@financas:workspaces_v1';
 const ACTIVE_WORKSPACE_KEY = '@financas:active_workspace_id_v1';
+const DEFAULT_WORKSPACE_KEY = '@financas:default_workspace_id_v1';
 
 export const DEFAULT_WORKSPACES: Workspace[] = [
   {
@@ -59,5 +60,17 @@ export class WorkspaceRepository {
 
   static async setActiveWorkspaceId(id: string): Promise<void> {
     await AsyncStorage.setItem(ACTIVE_WORKSPACE_KEY, id);
+  }
+
+  static async getDefaultWorkspaceId(): Promise<string | null> {
+    try {
+      return await AsyncStorage.getItem(DEFAULT_WORKSPACE_KEY);
+    } catch {
+      return null;
+    }
+  }
+
+  static async setDefaultWorkspaceId(id: string): Promise<void> {
+    await AsyncStorage.setItem(DEFAULT_WORKSPACE_KEY, id);
   }
 }

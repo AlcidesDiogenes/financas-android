@@ -7,7 +7,9 @@ import { SupabaseService } from '../../services/supabase/supabaseClient';
 interface WorkspaceContextType {
   workspaces: Workspace[];
   activeWorkspace: Workspace;
+  defaultWorkspaceId: string | null;
   setActiveWorkspace: (id: string) => Promise<void>;
+  setDefaultWorkspace: (id: string) => Promise<void>;
   createWorkspace: (name: string, description: string, isShared: boolean) => Promise<void>;
   addMember: (workspaceId: string, name: string, email: string, role: WorkspaceRole) => Promise<void>;
   updateMemberRole: (workspaceId: string, memberId: string, role: WorkspaceRole) => Promise<void>;
@@ -26,6 +28,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const { user } = useAuth();
   const [workspaces, setWorkspaces] = useState<Workspace[]>(DEFAULT_WORKSPACES);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string>(DEFAULT_WORKSPACES[0].id);
+  const [defaultWorkspaceId, setDefaultWorkspaceIdState] = useState<string | null>(null);
 
   useEffect(() => {
     loadWorkspaces();
@@ -41,7 +44,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     let list = await WorkspaceRepository.getWorkspaces();
-    const activeId = await WorkspaceRepository.getActiveWorkspaceId();
+    const savedDefaultId = await WorkspaceRepository.getDefaultWorkspaceId();
+    setDefaultWorkspaceIdState(savedDefaultId);
+    const activeId = savedDefaultId || (await WorkspaceRepository.getActiveWorkspaceId());
 
     // If user is authenticated, check for email invitations in Supabase
     if (user?.email) {
@@ -111,11 +116,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     }
 
     setWorkspaces(list);
-    const found = list.find((w) => w.id === activeId);
+    // Prioriza o espaço padrão definido pelo usuário se ele existir na lista
+    const targetId = (savedDefaultId && list.some((w) => w.id === savedDefaultId)) ? savedDefaultId : activeId;
+    const found = list.find((w) => w.id === targetId);
     if (found) {
       setActiveWorkspaceIdState(found.id);
+      await WorkspaceRepository.setActiveWorkspaceId(found.id);
     } else if (list.length > 0) {
       setActiveWorkspaceIdState(list[0].id);
+      await WorkspaceRepository.setActiveWorkspaceId(list[0].id);
     }
   };
 
@@ -131,6 +140,12 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const setActiveWorkspace = async (id: string) => {
     setActiveWorkspaceIdState(id);
     await WorkspaceRepository.setActiveWorkspaceId(id);
+  };
+
+  const setDefaultWorkspace = async (id: string) => {
+    setDefaultWorkspaceIdState(id);
+    await WorkspaceRepository.setDefaultWorkspaceId(id);
+    await setActiveWorkspace(id);
   };
 
   const createWorkspace = async (
@@ -476,7 +491,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       value={{
         workspaces,
         activeWorkspace,
+        defaultWorkspaceId,
         setActiveWorkspace,
+        setDefaultWorkspace,
         createWorkspace,
         addMember,
         updateMemberRole,

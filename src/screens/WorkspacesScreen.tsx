@@ -28,7 +28,9 @@ export const WorkspacesScreen: React.FC = () => {
   const {
     workspaces,
     activeWorkspace,
+    defaultWorkspaceId,
     setActiveWorkspace,
+    setDefaultWorkspace,
     createWorkspace,
     addMember,
     updateMemberRole,
@@ -201,6 +203,14 @@ export const WorkspacesScreen: React.FC = () => {
                   >
                     {ws.name}
                   </Text>
+                  {defaultWorkspaceId === ws.id && (
+                    <Ionicons
+                      name="star"
+                      size={12}
+                      color={isSelected ? '#FDE047' : '#EAB308'}
+                      style={{ marginLeft: 4 }}
+                    />
+                  )}
                   {isSelected && (
                     <View style={styles.activeDot} />
                   )}
@@ -271,7 +281,28 @@ export const WorkspacesScreen: React.FC = () => {
               </Text>
             </View>
 
-            <Badge label="Em Uso" variant="primary" />
+            <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <Badge label="Em Uso" variant="primary" />
+              {defaultWorkspaceId === activeWorkspace.id ? (
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: '#10B98118', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6 }}>
+                  <Ionicons name="star" size={11} color="#10B981" style={{ marginRight: 3 }} />
+                  <Text style={{ fontSize: 10, fontWeight: '700', color: '#10B981' }}>Padrão</Text>
+                </View>
+              ) : (
+                <TouchableOpacity
+                  onPress={() => {
+                    setDefaultWorkspace(activeWorkspace.id);
+                    Alert.alert('Espaço Padrão Definido! ⭐', `"${activeWorkspace.name}" agora é o seu espaço padrão. Ele será aberto automaticamente ao entrar no app.`);
+                  }}
+                  activeOpacity={0.7}
+                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+                  style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: theme.surfaceVariant, paddingHorizontal: 6, paddingVertical: 3, borderRadius: 6 }}
+                >
+                  <Ionicons name="star-outline" size={12} color={theme.textMuted} style={{ marginRight: 3 }} />
+                  <Text style={{ fontSize: 10, fontWeight: '600', color: theme.textMuted }}>Tornar Padrão</Text>
+                </TouchableOpacity>
+              )}
+            </View>
           </View>
 
           {/* Bloco de Código de Convite com Compartilhamento Rápido */}

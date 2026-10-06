@@ -281,6 +281,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
             recurring={item}
             onTogglePaid={toggleRecurringPaid}
             canEdit={canEdit}
+            showVigencia={false}
           />
         ))}
 

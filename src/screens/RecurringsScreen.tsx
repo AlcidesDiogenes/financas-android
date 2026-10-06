@@ -216,6 +216,7 @@ export const RecurringsScreen: React.FC = () => {
               }}
               onDelete={deleteRecurring}
               canEdit={canEdit}
+              showVigencia={filterVigencia === 'all'}
             />
           ))
         )}

@@ -38,6 +38,8 @@ const LOCAL_PROFILE_KEY = '@financas:local_user_profile';
 
 const clearLocalUserData = async () => {
   try {
+    // Preserva o default workspace se configurado
+    const defaultWsId = await WorkspaceRepository.getDefaultWorkspaceId();
     await Promise.all([
       TransactionRepository.saveAll([]),
       RecurringRepository.saveAll([]),
@@ -45,7 +47,7 @@ const clearLocalUserData = async () => {
       BudgetRepository.saveAll([]),
       GoalRepository.saveAll([]),
       WorkspaceRepository.saveWorkspaces(DEFAULT_WORKSPACES),
-      WorkspaceRepository.setActiveWorkspaceId(DEFAULT_WORKSPACES[0].id),
+      WorkspaceRepository.setActiveWorkspaceId(defaultWsId || DEFAULT_WORKSPACES[0].id),
     ]);
   } catch {}
 };

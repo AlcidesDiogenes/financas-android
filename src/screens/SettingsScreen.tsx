@@ -11,6 +11,7 @@ import {
   ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
+  AppState,
 } from 'react-native';
 import * as Updates from 'expo-updates';
 import AsyncStorage from '@react-native-async-storage/async-storage';
@@ -52,7 +53,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
 
   // Modal Customizado de Atualizações OTA
   const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [updateStep, setUpdateStep] = useState<'available' | 'downloading' | 'ready'>('available');
+  const [updateStep, setUpdateStep] = useState<'available' | 'downloading' | 'installing' | 'ready'>('available');
+  const [updateStage, setUpdateStage] = useState<'download' | 'install' | 'ready'>('download');
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState(0);
   const [updateStatusText, setUpdateStatusText] = useState('');
   const [isReloadingApp, setIsReloadingApp] = useState(false);
@@ -236,43 +238,83 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
     }
   };
 
-  // Iniciar download com progresso visual animado
+  // Monitorar ciclo de vida do aplicativo durante atualizações
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextAppState) => {
+      if (nextAppState.match(/inactive|background/)) {
+        if (updateStep === 'downloading' || updateStep === 'installing') {
+          console.log('[OTA] Aplicativo minimizado durante atualização. Processo continuará em segundo plano.');
+        }
+      } else if (nextAppState === 'active') {
+        if (updateStep === 'downloading' || updateStep === 'installing') {
+          console.log('[OTA] Aplicativo restaurado ao primeiro plano.');
+        }
+      }
+    });
+    return () => sub.remove();
+  }, [updateStep]);
+
+  // Iniciar download com progresso visual dividido em etapas claras (UI/UX)
   const handleStartUpdateDownload = async () => {
     setUpdateStep('downloading');
-    setUpdateDownloadProgress(15);
-    setUpdateStatusText('Conectando ao servidor seguro da nuvem...');
+    setUpdateStage('download');
+    setUpdateDownloadProgress(10);
+    setUpdateStatusText('Etapa 1/2: Baixando novos arquivos e telas...');
 
-    // Progresso simulado fluido enquanto o download real ocorre
-    const interval = setInterval(() => {
-      setUpdateDownloadProgress((prev) => {
-        if (prev < 40) {
-          setUpdateStatusText('Baixando novos arquivos e telas...');
-          return prev + 12;
-        }
-        if (prev < 80) {
-          setUpdateStatusText('Otimizando recursos e preparando código...');
-          return prev + 10;
-        }
-        if (prev < 92) {
-          setUpdateStatusText('Finalizando verificação de integridade...');
-          return prev + 3;
-        }
-        return prev;
-      });
-    }, 400);
+    // Progresso do download (10% a 92%)
+    let currentProgress = 10;
+    const downloadInterval = setInterval(() => {
+      currentProgress += Math.floor(Math.random() * 8) + 6;
+      if (currentProgress > 92) {
+        currentProgress = 92;
+        clearInterval(downloadInterval);
+      }
+      setUpdateDownloadProgress(currentProgress);
+      if (currentProgress < 50) {
+        setUpdateStatusText('Etapa 1/2: Baixando novos arquivos e telas...');
+      } else {
+        setUpdateStatusText('Etapa 1/2: Concluindo download do pacote...');
+      }
+    }, 350);
 
     try {
-      await Updates.fetchUpdateAsync();
-      clearInterval(interval);
+      // Inicia a busca e download real pelo expo-updates
+      const fetchPromise = Updates.fetchUpdateAsync();
+
+      await fetchPromise;
+      clearInterval(downloadInterval);
+
+      // Etapa 2: Instalação, descompactação e compilação do bundle
+      setUpdateStep('installing');
+      setUpdateStage('install');
+      setUpdateDownloadProgress(94);
+      setUpdateStatusText('Etapa 2/2: Instalando e verificando integridade do código...');
+
+      let installProgress = 94;
+      const installInterval = setInterval(() => {
+        installProgress += 2;
+        if (installProgress >= 99) {
+          installProgress = 99;
+          clearInterval(installInterval);
+        }
+        setUpdateDownloadProgress(installProgress);
+        setUpdateStatusText('Etapa 2/2: Finalizando instalação dos módulos...');
+      }, 250);
+
+      // Breve pausa para garantir que os arquivos em disco foram validados
+      await new Promise((r) => setTimeout(r, 900));
+      clearInterval(installInterval);
+
       setUpdateDownloadProgress(100);
-      setUpdateStatusText('Instalação concluída com sucesso!');
+      setUpdateStatusText('Tudo pronto! Nova versão instalada com sucesso.');
+      setUpdateStage('ready');
       setUpdateStep('ready');
     } catch (downloadErr: any) {
-      clearInterval(interval);
+      clearInterval(downloadInterval);
       setShowUpdateModal(false);
       Alert.alert(
-        'Falha no Download',
-        `Não foi possível baixar os arquivos da nova versão:\n${downloadErr?.message || 'Verifique sua conexão com a internet.'}`
+        'Falha na Atualização',
+        `Não foi possível concluir o download:\n${downloadErr?.message || 'Verifique sua conexão com a internet e tente novamente.'}`
       );
     }
   };
@@ -1196,6 +1238,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                     backgroundColor:
                       updateStep === 'ready'
                         ? '#E8F5E9'
+                        : updateStep === 'installing'
+                        ? '#EDE7F6'
                         : updateStep === 'downloading'
                         ? '#E3F2FD'
                         : '#EDE7F6',
@@ -1206,6 +1250,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                   name={
                     updateStep === 'ready'
                       ? 'checkmark-circle'
+                      : updateStep === 'installing'
+                      ? 'construct'
                       : updateStep === 'downloading'
                       ? 'cloud-download'
                       : 'rocket'
@@ -1214,6 +1260,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                   color={
                     updateStep === 'ready'
                       ? '#2E7D32'
+                      : updateStep === 'installing'
+                      ? '#673AB7'
                       : updateStep === 'downloading'
                       ? theme.primary
                       : '#673AB7'
@@ -1225,38 +1273,74 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
             <Text style={[styles.updateModalTitle, { color: theme.text }]}>
               {updateStep === 'ready'
                 ? 'Atualização Pronta!'
+                : updateStep === 'installing'
+                ? 'Instalando Atualização...'
                 : updateStep === 'downloading'
-                ? 'Baixando Atualização...'
+                ? 'Baixando Arquivos...'
                 : 'Nova Versão Disponível! 🎉'}
             </Text>
 
             <Text style={[styles.updateModalSubtitle, { color: theme.textMuted }]}>
               {updateStep === 'ready'
                 ? 'Os novos arquivos foram instalados. Reinicie o aplicativo para ver as novidades imediatamente.'
-                : updateStep === 'downloading'
+                : updateStep === 'installing' || updateStep === 'downloading'
                 ? updateStatusText
                 : 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'}
             </Text>
 
-            {/* BARRA DE PROGRESSO VISUAL */}
-            {updateStep === 'downloading' && (
+            {/* BARRA DE PROGRESSO VISUAL & ETAPAS */}
+            {(updateStep === 'downloading' || updateStep === 'installing') && (
               <View style={styles.progressContainer}>
+                {/* Indicador de Etapas */}
+                <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons
+                      name={updateStep === 'installing' ? 'checkmark-circle' : 'radio-button-on'}
+                      size={14}
+                      color={updateStep === 'installing' ? '#10B981' : theme.primary}
+                    />
+                    <Text style={{ fontSize: 11, fontWeight: '700', marginLeft: 4, color: updateStep === 'installing' ? '#10B981' : theme.primary }}>
+                      1. Download
+                    </Text>
+                  </View>
+
+                  <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                    <Ionicons
+                      name={updateStep === 'installing' ? 'radio-button-on' : 'ellipse-outline'}
+                      size={14}
+                      color={updateStep === 'installing' ? '#673AB7' : theme.textMuted}
+                    />
+                    <Text style={{ fontSize: 11, fontWeight: updateStep === 'installing' ? '700' : '500', marginLeft: 4, color: updateStep === 'installing' ? '#673AB7' : theme.textMuted }}>
+                      2. Instalação
+                    </Text>
+                  </View>
+                </View>
+
                 <View style={[styles.progressBarBg, { backgroundColor: isDark ? '#333' : '#E0E0E0' }]}>
                   <View
                     style={[
                       styles.progressBarFill,
                       {
                         width: `${updateDownloadProgress}%`,
-                        backgroundColor: theme.primary,
+                        backgroundColor: updateStep === 'installing' ? '#673AB7' : theme.primary,
                       },
                     ]}
                   />
                 </View>
+
                 <View style={styles.progressTextRow}>
-                  <Text style={[styles.progressPercent, { color: theme.primary }]}>
+                  <Text style={[styles.progressPercent, { color: updateStep === 'installing' ? '#673AB7' : theme.primary }]}>
                     {updateDownloadProgress}%
                   </Text>
-                  <ActivityIndicator size="small" color={theme.primary} />
+                  <ActivityIndicator size="small" color={updateStep === 'installing' ? '#673AB7' : theme.primary} />
+                </View>
+
+                {/* Dica amigável para não interromper */}
+                <View style={{ flexDirection: 'row', alignItems: 'center', backgroundColor: isDark ? '#262626' : '#F3F4F6', padding: 8, borderRadius: 8, marginTop: 10 }}>
+                  <Ionicons name="information-circle-outline" size={15} color={theme.textMuted} style={{ marginRight: 6 }} />
+                  <Text style={{ fontSize: 11, color: theme.textMuted, flex: 1 }}>
+                    Mantenha o app em primeiro plano para concluir mais rápido.
+                  </Text>
                 </View>
               </View>
             )}

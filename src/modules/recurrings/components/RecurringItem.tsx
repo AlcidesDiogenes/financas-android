@@ -14,6 +14,7 @@ interface RecurringItemProps {
   onEditFull?: (recurring: RecurringDebit) => void;
   onDelete?: (id: string) => void;
   canEdit?: boolean;
+  showVigencia?: boolean;
 }
 
 export const RecurringItem: React.FC<RecurringItemProps> = ({
@@ -23,11 +24,13 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
   onEditFull,
   onDelete,
   canEdit = true,
+  showVigencia = true,
 }) => {
   const { theme } = useTheme();
   const meta = getCategoryMeta(recurring.category);
 
   const vigenciaLabel = React.useMemo(() => {
+    if (!showVigencia) return null;
     if (!recurring.startDate && !recurring.endDate) return null;
     const formatYm = (ym: string) => {
       const parts = ym.split('-');
@@ -44,7 +47,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
       return `Até ${formatYm(recurring.endDate)}`;
     }
     return null;
-  }, [recurring.startDate, recurring.endDate]);
+  }, [showVigencia, recurring.startDate, recurring.endDate]);
 
   return (
     <View

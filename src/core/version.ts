@@ -1,7 +1,7 @@
 // Controlador Central de Versão do Aplicativo Finanças
 export const APP_VERSION_CONFIG = {
-  version: '1.3.4',
-  buildNumber: 6,
+  version: '1.3.5',
+  buildNumber: 7,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
