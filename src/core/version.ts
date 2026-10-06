@@ -14,7 +14,7 @@ export interface ReleaseNote {
 
 export const APP_VERSION_CONFIG = {
   version: '1.0.0',
-  buildNumber: 2,
+  buildNumber: 3,
   releaseDate: '06/10/2026',
   environment: 'production',
   platform: 'Android',
@@ -25,6 +25,34 @@ export const getAppVersionString = (): string => {
 };
 
 export const RELEASE_HISTORY: ReleaseNote[] = [
+  {
+    version: '1.0.0',
+    buildNumber: 3,
+    date: '06/10/2026',
+    title: 'Aprovação Prévia de Entrada em Espaços Compartilhados 🛡️',
+    highlight:
+      'Controle absoluto do proprietário: agora, quem insere o código de convite envia uma solicitação pendente. O dono do espaço decide se aceita ou recusa e define se a pessoa poderá editar ou apenas visualizar.',
+    changes: [
+      {
+        icon: 'hand-right-outline',
+        title: 'Solicitação com Aprovação Obrigatória',
+        description:
+          'Nenhum usuário entra mais diretamente por código. A solicitação fica pendente até a revisão formal do proprietário.',
+      },
+      {
+        icon: 'options-outline',
+        title: 'Definição de Papel na Aprovação',
+        description:
+          'Ao aprovar uma solicitação, o proprietário escolhe imediatamente se a pessoa terá permissão de "Pode Editar" ou "Apenas Ver".',
+      },
+      {
+        icon: 'shield-checkmark-outline',
+        title: 'Bloqueio de Dados até Autorização',
+        description:
+          'Usuários pendentes não têm acesso a lançamentos, orçamentos ou contas até que sua entrada seja confirmada.',
+      },
+    ],
+  },
   {
     version: '1.0.0',
     buildNumber: 2,

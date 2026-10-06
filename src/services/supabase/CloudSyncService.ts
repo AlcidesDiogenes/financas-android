@@ -400,10 +400,12 @@ export class CloudSyncService {
       try {
         const { data: memberRows, error: memberErr } = await client
           .from('workspace_members')
-          .select('workspace_id')
+          .select('workspace_id, role')
           .eq('email', userEmail);
         if (!memberErr && memberRows) {
-          memberWorkspaceIds = memberRows.map((m) => m.workspace_id);
+          memberWorkspaceIds = memberRows
+            .filter((m) => m.role !== 'pending')
+            .map((m) => m.workspace_id);
         }
       } catch {
         // Se a tabela workspace_members ainda não foi criada no Supabase, continua normalmente

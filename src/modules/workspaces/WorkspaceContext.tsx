@@ -23,6 +23,8 @@ interface WorkspaceContextType {
   createWorkspace: (name: string, description: string, isShared: boolean) => Promise<void>;
   addMember: (workspaceId: string, name: string, email: string, role: WorkspaceRole) => Promise<void>;
   updateMemberRole: (workspaceId: string, memberId: string, role: WorkspaceRole) => Promise<void>;
+  approveMember: (workspaceId: string, memberId: string, role: 'editor' | 'viewer') => Promise<void>;
+  rejectMember: (workspaceId: string, memberId: string) => Promise<void>;
   removeMember: (workspaceId: string, memberId: string) => Promise<void>;
   renameWorkspace: (workspaceId: string, newName: string) => Promise<void>;
   transferOwnership: (workspaceId: string, newOwnerEmail: string) => Promise<{ success: boolean; message: string }>;
@@ -31,6 +33,7 @@ interface WorkspaceContextType {
   joinWorkspaceByCode: (inviteCode: string) => Promise<{ success: boolean; message: string }>;
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
+  pendingRequestsCount: number;
 }
 
 const migrateLocalSoloData = async (personalWsId: string) => {
@@ -145,12 +148,13 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
           .eq('email', user.email.toLowerCase().trim());
 
         if (memberRows) {
-          // Filtra apenas workspaces compartilhados aos quais este usuário realmente pertence na nuvem
+          // Filtra apenas workspaces compartilhados aos quais este usuário realmente pertence E já foi APROVADO na nuvem
           const sharedWsIds = memberRows
+            .filter((m) => m.role !== 'pending')
             .map((m) => m.workspace_id)
             .filter((id) => id !== personalWsId && !id.startsWith('ws-solo'));
 
-          // Remove da lista local qualquer espaço compartilhado do qual o usuário tenha sido desvinculado
+          // Remove da lista local qualquer espaço compartilhado do qual o usuário tenha sido desvinculado ou esteja pendente
           list = list.filter((w) => w.id === personalWsId || sharedWsIds.includes(w.id));
 
           if (sharedWsIds.length > 0) {
@@ -237,6 +241,15 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   );
   const currentUserRole: WorkspaceRole = currentMember ? currentMember.role : 'owner';
   const canEdit = currentUserRole === 'owner' || currentUserRole === 'editor';
+
+  const pendingRequestsCount = workspaces
+    .filter((w) => {
+      const myMem = w.members.find(
+        (m) => m.email.toLowerCase().trim() === user?.email?.toLowerCase().trim()
+      );
+      return myMem?.role === 'owner';
+    })
+    .reduce((acc, w) => acc + w.members.filter((m) => m.role === 'pending').length, 0);
 
   const setActiveWorkspace = async (id: string) => {
     setActiveWorkspaceIdState(id);
@@ -375,6 +388,36 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         await client.from('workspace_members').update({ role }).eq('id', memberId);
       } catch {}
     }
+  };
+
+  const approveMember = async (
+    workspaceId: string,
+    memberId: string,
+    newRole: 'editor' | 'viewer' = 'editor'
+  ) => {
+    const updated = workspaces.map((w) => {
+      if (w.id === workspaceId) {
+        return {
+          ...w,
+          members: w.members.map((m) =>
+            m.id === memberId ? { ...m, role: newRole as WorkspaceRole } : m
+          ),
+        };
+      }
+      return w;
+    });
+
+    setWorkspaces(updated);
+    await WorkspaceRepository.saveWorkspaces(updated);
+
+    try {
+      const client = await SupabaseService.getClient();
+      await client.from('workspace_members').update({ role: newRole }).eq('id', memberId);
+    } catch {}
+  };
+
+  const rejectMember = async (workspaceId: string, memberId: string) => {
+    await removeMember(workspaceId, memberId);
   };
 
   const removeMember = async (workspaceId: string, memberId: string) => {
@@ -629,41 +672,40 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         return { success: true, message: 'Você já faz parte deste espaço!' };
       }
 
-      const joinedWs: Workspace = {
-        id: data.id,
-        name: data.name,
-        description: data.description || '',
-        type: data.type as any,
-        inviteCode: data.invite_code,
-        createdAt: data.created_at,
-        members: [
-          {
-            id: `user-${Date.now()}`,
-            name: user?.name || 'Você',
-            email: user?.email || 'meu@email.com',
-            role: 'editor',
-            isCurrentUser: true,
-          },
-        ],
-      };
+      const userEmail = user.email.toLowerCase().trim();
 
-      const updated = [...workspaces, joinedWs];
-      setWorkspaces(updated);
-      await WorkspaceRepository.saveWorkspaces(updated);
-      await setActiveWorkspace(joinedWs.id);
+      // Verifica se o usuário já tem registro de membro ou solicitação para este espaço no Supabase
+      const { data: existingMember } = await client
+        .from('workspace_members')
+        .select('*')
+        .eq('workspace_id', data.id)
+        .eq('email', userEmail)
+        .maybeSingle();
 
-      // Register membership in Supabase
-      if (user?.email) {
-        await client.from('workspace_members').upsert({
-          id: `mem-${Date.now()}`,
-          workspace_id: data.id,
-          email: user.email.toLowerCase().trim(),
-          name: user.name || 'Você',
-          role: 'editor',
-        });
+      if (existingMember) {
+        if (existingMember.role === 'pending') {
+          return {
+            success: true,
+            message: `Você já enviou uma solicitação para entrar em "${data.name}". Aguarde o proprietário aprovar seu acesso! ⏳`,
+          };
+        }
+        return { success: true, message: `Você já faz parte do espaço "${data.name}"!` };
       }
 
-      return { success: true, message: `Conectado com sucesso ao espaço "${data.name}"!` };
+      // Registra a solicitação como PENDENTE na nuvem para aprovação do proprietário
+      const reqId = `req-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`;
+      await client.from('workspace_members').insert({
+        id: reqId,
+        workspace_id: data.id,
+        email: userEmail,
+        name: user.name || 'Usuário',
+        role: 'pending',
+      });
+
+      return {
+        success: true,
+        message: `Solicitação enviada com sucesso para "${data.name}"! 🎉 O proprietário precisa aprovar sua entrada e definir sua permissão antes que os dados sejam liberados.`,
+      };
     } catch (e: any) {
       return { success: false, message: e?.message || 'Erro ao conectar ao espaço.' };
     }
@@ -680,6 +722,8 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         createWorkspace,
         addMember,
         updateMemberRole,
+        approveMember,
+        rejectMember,
         removeMember,
         renameWorkspace,
         transferOwnership,
@@ -688,6 +732,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         joinWorkspaceByCode,
         currentUserRole,
         canEdit,
+        pendingRequestsCount,
       }}
     >
       {children}

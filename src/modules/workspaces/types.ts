@@ -1,5 +1,5 @@
 export type WorkspaceType = 'solo' | 'shared';
-export type WorkspaceRole = 'owner' | 'editor' | 'viewer';
+export type WorkspaceRole = 'owner' | 'editor' | 'viewer' | 'pending';
 
 export interface WorkspaceMember {
   id: string;
@@ -7,6 +7,7 @@ export interface WorkspaceMember {
   email: string;
   role: WorkspaceRole;
   isCurrentUser: boolean;
+  requestedAt?: string;
 }
 
 export interface Workspace {

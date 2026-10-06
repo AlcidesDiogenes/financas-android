@@ -34,6 +34,8 @@ export const WorkspacesScreen: React.FC = () => {
     createWorkspace,
     addMember,
     updateMemberRole,
+    approveMember,
+    rejectMember,
     removeMember,
     renameWorkspace,
     transferOwnership,
@@ -41,6 +43,7 @@ export const WorkspacesScreen: React.FC = () => {
     leaveWorkspace,
     joinWorkspaceByCode,
     currentUserRole,
+    pendingRequestsCount,
   } = useWorkspace();
 
   // Rename Workspace Modal
@@ -241,6 +244,45 @@ export const WorkspacesScreen: React.FC = () => {
     await removeMember(activeWorkspace.id, selectedMemberToManage.id);
     setIsManagingLoading(false);
     handleCloseManageMember();
+  };
+
+  const handleApproveRequest = (
+    req: { id: string; name: string; email: string },
+    role: 'editor' | 'viewer'
+  ) => {
+    const roleLabel = role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️';
+    Alert.alert(
+      'Aprovar Entrada',
+      `Deseja autorizar "${req.name}" (${req.email}) com a permissão: ${roleLabel}?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Confirmar Aprovação',
+          onPress: async () => {
+            await approveMember(activeWorkspace.id, req.id, role);
+            Alert.alert('Membro Aprovado! 🎉', `"${req.name}" agora tem acesso a este espaço.`);
+          },
+        },
+      ]
+    );
+  };
+
+  const handleRejectRequest = (req: { id: string; name: string; email: string }) => {
+    Alert.alert(
+      'Recusar Solicitação',
+      `Tem certeza que deseja recusar a solicitação de "${req.name}" (${req.email})?`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Recusar',
+          style: 'destructive',
+          onPress: async () => {
+            await rejectMember(activeWorkspace.id, req.id);
+            Alert.alert('Solicitação Recusada', `A solicitação foi recusada e o usuário não terá acesso.`);
+          },
+        },
+      ]
+    );
   };
 
   return (
@@ -454,100 +496,183 @@ export const WorkspacesScreen: React.FC = () => {
         </Card>
 
         {/* Detalhes de Membros (Se Compartilhado) */}
-        {!isSolo && (
-          <View style={styles.membersSection}>
-            <View style={styles.sectionHeaderRow}>
-              <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                Pessoas com Acesso ({activeWorkspace.members.length})
-              </Text>
+        {!isSolo && (() => {
+          const activeMembers = activeWorkspace.members.filter((m) => m.role !== 'pending');
+          const pendingRequests = activeWorkspace.members.filter((m) => m.role === 'pending');
 
-              <TouchableOpacity
-                onPress={() => setMemberModalVisible(true)}
-                style={[styles.inviteSmallBtn, { backgroundColor: theme.surfaceVariant }]}
-                activeOpacity={0.7}
-              >
-                <Ionicons name="person-add" size={13} color={theme.primary} style={{ marginRight: 4 }} />
-                <Text style={[styles.inviteSmallBtnText, { color: theme.primary }]}>
-                  Convidar
+          return (
+            <View style={styles.membersSection}>
+              {/* Bloco de Solicitações Pendentes (visível apenas para o Proprietário) */}
+              {currentUserRole === 'owner' && pendingRequests.length > 0 && (
+                <View
+                  style={[
+                    styles.pendingContainer,
+                    { backgroundColor: '#F59E0B12', borderColor: '#F59E0B40' },
+                  ]}
+                >
+                  <View style={styles.pendingHeaderRow}>
+                    <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                      <Ionicons name="time" size={17} color="#F59E0B" style={{ marginRight: 6 }} />
+                      <Text style={[styles.pendingSectionTitle, { color: theme.text }]}>
+                        Solicitações de Entrada ({pendingRequests.length})
+                      </Text>
+                    </View>
+                    <Badge label="Aguardando" variant="warning" />
+                  </View>
+
+                  <Text style={[styles.pendingDescription, { color: theme.textMuted }]}>
+                    Pessoas que usaram o código de convite e aguardam sua aprovação para acessar este espaço:
+                  </Text>
+
+                  {pendingRequests.map((req) => (
+                    <Card key={req.id} variant="flat" style={styles.pendingReqCard}>
+                      <View style={styles.pendingReqInfo}>
+                        <View
+                          style={[
+                            styles.memberAvatar,
+                            { backgroundColor: '#F59E0B20' },
+                          ]}
+                        >
+                          <Text style={[styles.memberAvatarText, { color: '#F59E0B' }]}>
+                            {(req.name.charAt(0) || 'U').toUpperCase()}
+                          </Text>
+                        </View>
+                        <View style={styles.memberDetails}>
+                          <Text style={[styles.memberName, { color: theme.text }]}>
+                            {req.name}
+                          </Text>
+                          <Text style={[styles.memberEmail, { color: theme.textMuted }]}>
+                            {req.email}
+                          </Text>
+                        </View>
+                      </View>
+
+                      <View style={styles.approvalButtonsRow}>
+                        <TouchableOpacity
+                          style={[styles.approveActionBtn, { backgroundColor: '#10B981' }]}
+                          onPress={() => handleApproveRequest(req, 'editor')}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="create-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                          <Text style={styles.approveActionBtnText}>Pode Editar ✏️</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.approveActionBtn, { backgroundColor: '#3B82F6' }]}
+                          onPress={() => handleApproveRequest(req, 'viewer')}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="eye-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                          <Text style={styles.approveActionBtnText}>Apenas Ver 👁️</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={[styles.rejectActionBtn, { borderColor: theme.danger }]}
+                          onPress={() => handleRejectRequest(req)}
+                          activeOpacity={0.8}
+                        >
+                          <Ionicons name="close" size={15} color={theme.danger} style={{ marginRight: 2 }} />
+                          <Text style={[styles.rejectActionBtnText, { color: theme.danger }]}>Recusar</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </Card>
+                  ))}
+                </View>
+              )}
+
+              <View style={styles.sectionHeaderRow}>
+                <Text style={[styles.sectionTitle, { color: theme.text }]}>
+                  Pessoas com Acesso ({activeMembers.length})
                 </Text>
-              </TouchableOpacity>
-            </View>
 
-            {activeWorkspace.members.map((member) => {
-              const isYou = member.isCurrentUser;
-              const displayName = isYou
-                ? member.name === 'Você'
-                  ? 'Você'
-                  : `${member.name} (Você)`
-                : member.name;
-              const initial = (displayName.charAt(0) || 'U').toUpperCase();
+                <TouchableOpacity
+                  onPress={() => setMemberModalVisible(true)}
+                  style={[styles.inviteSmallBtn, { backgroundColor: theme.surfaceVariant }]}
+                  activeOpacity={0.7}
+                >
+                  <Ionicons name="person-add" size={13} color={theme.primary} style={{ marginRight: 4 }} />
+                  <Text style={[styles.inviteSmallBtnText, { color: theme.primary }]}>
+                    Convidar
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-              return (
-                <Card key={member.id} variant="flat" style={styles.memberCard}>
-                  <View style={styles.memberRow}>
-                    <View
-                      style={[
-                        styles.memberAvatar,
-                        {
-                          backgroundColor: isYou ? `${theme.primary}20` : '#8B5CF620',
-                        },
-                      ]}
-                    >
-                      <Text
+              {activeMembers.map((member) => {
+                const isYou = member.isCurrentUser;
+                const displayName = isYou
+                  ? member.name === 'Você'
+                    ? 'Você'
+                    : `${member.name} (Você)`
+                  : member.name;
+                const initial = (displayName.charAt(0) || 'U').toUpperCase();
+
+                return (
+                  <Card key={member.id} variant="flat" style={styles.memberCard}>
+                    <View style={styles.memberRow}>
+                      <View
                         style={[
-                          styles.memberAvatarText,
-                          { color: isYou ? theme.primary : '#8B5CF6' },
+                          styles.memberAvatar,
+                          {
+                            backgroundColor: isYou ? `${theme.primary}20` : '#8B5CF620',
+                          },
                         ]}
                       >
-                        {initial}
-                      </Text>
-                    </View>
-
-                    <View style={styles.memberDetails}>
-                      <Text style={[styles.memberName, { color: theme.text }]}>
-                        {displayName}
-                      </Text>
-                      <Text style={[styles.memberEmail, { color: theme.textMuted }]}>
-                        {member.email}
-                      </Text>
-                    </View>
-
-                    <View style={styles.memberActions}>
-                      {member.role === 'owner' ? (
-                        <Badge label="Proprietário" variant="primary" />
-                      ) : currentUserRole === 'owner' ? (
-                        <TouchableOpacity
-                          onPress={() => handleManageMemberRole(member)}
-                          activeOpacity={0.7}
+                        <Text
+                          style={[
+                            styles.memberAvatarText,
+                            { color: isYou ? theme.primary : '#8B5CF6' },
+                          ]}
                         >
+                          {initial}
+                        </Text>
+                      </View>
+
+                      <View style={styles.memberDetails}>
+                        <Text style={[styles.memberName, { color: theme.text }]}>
+                          {displayName}
+                        </Text>
+                        <Text style={[styles.memberEmail, { color: theme.textMuted }]}>
+                          {member.email}
+                        </Text>
+                      </View>
+
+                      <View style={styles.memberActions}>
+                        {member.role === 'owner' ? (
+                          <Badge label="Proprietário" variant="primary" />
+                        ) : currentUserRole === 'owner' ? (
+                          <TouchableOpacity
+                            onPress={() => handleManageMemberRole(member)}
+                            activeOpacity={0.7}
+                          >
+                            <Badge
+                              label={member.role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️'}
+                              variant={member.role === 'editor' ? 'success' : 'neutral'}
+                            />
+                          </TouchableOpacity>
+                        ) : (
                           <Badge
                             label={member.role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️'}
                             variant={member.role === 'editor' ? 'success' : 'neutral'}
                           />
-                        </TouchableOpacity>
-                      ) : (
-                        <Badge
-                          label={member.role === 'editor' ? 'Pode Editar ✏️' : 'Apenas Ver 👁️'}
-                          variant={member.role === 'editor' ? 'success' : 'neutral'}
-                        />
-                      )}
+                        )}
 
-                      {currentUserRole === 'owner' && !isYou && member.role !== 'owner' && (
-                        <TouchableOpacity
-                          onPress={() => handleConfirmRemoveMember(member)}
-                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                          style={{ marginLeft: 8 }}
-                        >
-                          <Ionicons name="close-circle-outline" size={20} color={theme.danger} />
-                        </TouchableOpacity>
-                      )}
+                        {currentUserRole === 'owner' && !isYou && member.role !== 'owner' && (
+                          <TouchableOpacity
+                            onPress={() => handleConfirmRemoveMember(member)}
+                            hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                            style={{ marginLeft: 8 }}
+                          >
+                            <Ionicons name="close-circle-outline" size={20} color={theme.danger} />
+                          </TouchableOpacity>
+                        )}
+                      </View>
                     </View>
-                  </View>
-                </Card>
-              );
-            })}
-          </View>
-        )}
+                  </Card>
+                );
+              })}
+            </View>
+          );
+        })()}
 
         {/* Visão do Espaço Solo (Privacidade & Sugestão) */}
         {isSolo && !user && (
@@ -1465,5 +1590,67 @@ const styles = StyleSheet.create({
   warningBoxDesc: {
     fontSize: 12,
     lineHeight: 18,
+  },
+  pendingContainer: {
+    padding: 14,
+    borderRadius: 14,
+    borderWidth: 1,
+    marginBottom: 16,
+  },
+  pendingHeaderRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  pendingSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  pendingDescription: {
+    fontSize: 12,
+    marginBottom: 12,
+  },
+  pendingReqCard: {
+    padding: 12,
+    borderRadius: 12,
+    marginBottom: 8,
+  },
+  pendingReqInfo: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 10,
+  },
+  approvalButtonsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    alignItems: 'center',
+  },
+  approveActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 7,
+    paddingHorizontal: 8,
+    borderRadius: 8,
+  },
+  approveActionBtnText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+  },
+  rejectActionBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    borderRadius: 8,
+    borderWidth: 1,
+  },
+  rejectActionBtnText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });
