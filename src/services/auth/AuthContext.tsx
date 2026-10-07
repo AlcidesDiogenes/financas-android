@@ -3,6 +3,7 @@ import { Alert } from 'react-native';
 import * as Linking from 'expo-linking';
 import { SupabaseService } from '../supabase/supabaseClient';
 import { CloudSyncService } from '../supabase/CloudSyncService';
+import { SyncQueue } from '../supabase/SyncQueue';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TransactionRepository } from '../../modules/transactions/repository';
 import { RecurringRepository } from '../../modules/recurrings/repository';
@@ -27,7 +28,7 @@ interface AuthContextType {
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   updatePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
   updateProfile: (newName: string) => Promise<{ success: boolean; error?: string }>;
-  signOut: () => Promise<void>;
+  signOut: (options?: { force?: boolean }) => Promise<{ success: boolean; pendingCount?: number }>;
   deleteAccount: () => Promise<{ success: boolean; error?: string }>;
   skipAuth: () => void;
   isGuest: boolean;
@@ -46,6 +47,7 @@ const clearLocalUserData = async () => {
       RecurringMonthRepository.saveAll([]),
       BudgetRepository.saveAll([]),
       GoalRepository.saveAll([]),
+      SyncQueue.clear(),
       WorkspaceRepository.saveWorkspaces(DEFAULT_WORKSPACES),
       WorkspaceRepository.setActiveWorkspaceId(defaultWsId || DEFAULT_WORKSPACES[0].id),
     ]);
@@ -384,11 +386,20 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
-  const signOut = async () => {
-    // 1. Salva e garante que todos os dados locais estejam salvos na nuvem antes de sair
+  const signOut = async (
+    options?: { force?: boolean }
+  ): Promise<{ success: boolean; pendingCount?: number }> => {
+    // 1. Envia as alterações pendentes. Se alguma não chegou à nuvem, não apaga nada
+    // (a menos que o usuário escolha sair mesmo assim e descartar as pendências).
+    let pendingCount = 0;
     try {
-      await CloudSyncService.syncLocalToCloud();
-    } catch {}
+      pendingCount = await CloudSyncService.flushQueue();
+    } catch {
+      pendingCount = await CloudSyncService.getPendingCount();
+    }
+    if (pendingCount > 0 && !options?.force) {
+      return { success: false, pendingCount };
+    }
 
     // 2. Desconecta da sessão Supabase
     try {
@@ -403,6 +414,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setIsGuest(false);
     await AsyncStorage.removeItem(GUEST_MODE_KEY);
     await AsyncStorage.removeItem(LOCAL_PROFILE_KEY);
+    return { success: true };
   };
 
   const deleteAccount = async (): Promise<{ success: boolean; error?: string }> => {

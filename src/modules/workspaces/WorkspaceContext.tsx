@@ -52,38 +52,33 @@ const migrateLocalSoloData = async (personalWsId: string) => {
     ]);
 
     if (txs.some((t) => t.workspaceId === 'ws-solo')) {
-      const updated = txs.map((t) =>
+      await TransactionRepository.mutate((all) => all.map((t) =>
         t.workspaceId === 'ws-solo' ? { ...t, workspaceId: personalWsId } : t
-      );
-      await TransactionRepository.saveAll(updated);
+      ));
     }
 
     if (recs.some((r) => r.workspaceId === 'ws-solo')) {
-      const updated = recs.map((r) =>
+      await RecurringRepository.mutate((all) => all.map((r) =>
         r.workspaceId === 'ws-solo' ? { ...r, workspaceId: personalWsId } : r
-      );
-      await RecurringRepository.saveAll(updated);
+      ));
     }
 
     if (months.some((m) => m.workspaceId === 'ws-solo')) {
-      const updated = months.map((m) =>
+      await RecurringMonthRepository.mutate((all) => all.map((m) =>
         m.workspaceId === 'ws-solo' ? { ...m, workspaceId: personalWsId } : m
-      );
-      await RecurringMonthRepository.saveAll(updated);
+      ));
     }
 
     if (budgets.some((b) => b.workspaceId === 'ws-solo')) {
-      const updated = budgets.map((b) =>
+      await BudgetRepository.mutate((all) => all.map((b) =>
         b.workspaceId === 'ws-solo' ? { ...b, workspaceId: personalWsId } : b
-      );
-      await BudgetRepository.saveAll(updated);
+      ));
     }
 
     if (goals.some((g) => g.workspaceId === 'ws-solo')) {
-      const updated = goals.map((g) =>
+      await GoalRepository.mutate((all) => all.map((g) =>
         g.workspaceId === 'ws-solo' ? { ...g, workspaceId: personalWsId } : g
-      );
-      await GoalRepository.saveAll(updated);
+      ));
     }
   } catch {}
 };

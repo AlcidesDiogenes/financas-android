@@ -1,4 +1,5 @@
-import React, { createContext, useContext, useEffect, useState, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useState, useMemo, useRef } from 'react';
+import { AppState } from 'react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useWorkspace } from './workspaces/WorkspaceContext';
 import { useAuth } from '../services/auth/AuthContext';
@@ -146,6 +147,18 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   useEffect(() => {
     reloadAll();
   }, [user?.id, activeWorkspace?.id]);
+
+  // Ao voltar do segundo plano: envia pendências da fila e baixa novidades da nuvem
+  const reloadAllRef = useRef(reloadAll);
+  reloadAllRef.current = reloadAll;
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'active') {
+        reloadAllRef.current();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
 
   // Filter by active workspace
   const workspaceTransactions = useMemo(
@@ -507,8 +520,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           amount: newAmount,
           updatedAt: new Date().toISOString(),
         };
+        // O registro do mês passa da conta antiga (encerrada no mês anterior) para a nova
         await RecurringMonthRepository.upsert(newMonthRecord);
+        const updatedMonthRecords = await RecurringMonthRepository.deleteByIds([existing.id]);
+        setAllRecurringMonthRecords(updatedMonthRecords);
         await CloudSyncService.autoUpsertRecurringMonthRecord(newMonthRecord);
+        await CloudSyncService.autoDeleteRecurringMonthRecord(existing.id);
 
         if (existing.isPaid && existing.transactionId) {
           const tx = allTransactions.find((t) => t.id === existing.transactionId);
@@ -658,11 +675,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setAllRecurrings(updatedRecs);
       await CloudSyncService.autoUpsertRecurring(updatedTarget);
 
-      // Remove o registro do mês selecionado se existia
+      // Remove o registro do mês selecionado se existia (no aparelho e na nuvem)
       if (existingMonthRecord) {
-        const remainingMonths = allRecurringMonthRecords.filter((m) => m.id !== existingMonthRecord.id);
-        await RecurringMonthRepository.saveAll(remainingMonths);
+        const remainingMonths = await RecurringMonthRepository.deleteByIds([existingMonthRecord.id]);
         setAllRecurringMonthRecords(remainingMonths);
+        await CloudSyncService.autoDeleteRecurringMonthRecord(existingMonthRecord.id);
       }
     } else if (scope === 'forward') {
       // 2. Desta competência em diante: encerra vigência no mês anterior
@@ -684,14 +701,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       setAllRecurrings(updatedRecs);
       await CloudSyncService.autoUpsertRecurring(updatedTarget);
 
-      // Remove registros mensais deste mês em diante
-      const remainingMonths = allRecurringMonthRecords.filter((m) => {
-        if (m.recurringId !== id) return true;
-        const mComp = `${m.year}-${String(m.month).padStart(2, '0')}`;
-        return mComp < ym;
-      });
-      await RecurringMonthRepository.saveAll(remainingMonths);
+      // Remove registros mensais deste mês em diante (no aparelho e na nuvem)
+      const removedIds = allRecurringMonthRecords
+        .filter((m) => m.recurringId === id && `${m.year}-${String(m.month).padStart(2, '0')}` >= ym)
+        .map((m) => m.id);
+      const remainingMonths = await RecurringMonthRepository.deleteByIds(removedIds);
       setAllRecurringMonthRecords(remainingMonths);
+      for (const monthRecordId of removedIds) {
+        await CloudSyncService.autoDeleteRecurringMonthRecord(monthRecordId);
+      }
     } else {
       // 3. De todos os meses (Definitivo)
       const updated = await RecurringRepository.delete(id);
@@ -699,8 +717,12 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       await CloudSyncService.autoDeleteRecurring(id);
 
       // Also delete any month records associated with this recurring
+      const removedIds = allRecurringMonthRecords.filter((m) => m.recurringId === id).map((m) => m.id);
       const updatedMonthRecords = await RecurringMonthRepository.deleteByRecurringId(id);
       setAllRecurringMonthRecords(updatedMonthRecords);
+      for (const monthRecordId of removedIds) {
+        await CloudSyncService.autoDeleteRecurringMonthRecord(monthRecordId);
+      }
     }
   };
 

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Goal } from './types';
+import { withStorageLock } from '../../core/storageLock';
 
 const GOALS_STORAGE_KEY = '@financas:goals_v1';
 
@@ -67,15 +68,21 @@ export class GoalRepository {
     await AsyncStorage.setItem(GOALS_STORAGE_KEY, JSON.stringify(goals));
   }
 
+  // Ler -> alterar -> gravar sob trava (evita sobrescrita concorrente com a sincronização)
+  static mutate(fn: (all: Goal[]) => Goal[]): Promise<Goal[]> {
+    return withStorageLock(GOALS_STORAGE_KEY, async () => {
+      const updated = fn(await this.getAll());
+      await this.saveAll(updated);
+      return updated;
+    });
+  }
+
   static async add(goal: Goal): Promise<Goal[]> {
     const item: Goal = {
       ...goal,
       updatedAt: goal.updatedAt || new Date().toISOString(),
     };
-    const all = await this.getAll();
-    const updated = [item, ...all.filter((g) => g.id !== item.id)];
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => [item, ...all.filter((g) => g.id !== item.id)]);
   }
 
   static async update(goal: Goal): Promise<Goal[]> {
@@ -83,34 +90,28 @@ export class GoalRepository {
       ...goal,
       updatedAt: new Date().toISOString(),
     };
-    const all = await this.getAll();
-    const updated = all.map((g) => (g.id === item.id ? item : g));
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => all.map((g) => (g.id === item.id ? item : g)));
   }
 
   static async deposit(id: string, amount: number): Promise<Goal[]> {
-    const all = await this.getAll();
-    const updated = all.map((g) =>
-      g.id === id ? { ...g, currentAmount: g.currentAmount + amount, updatedAt: new Date().toISOString() } : g
+    return this.mutate((all) =>
+      all.map((g) =>
+        g.id === id ? { ...g, currentAmount: g.currentAmount + amount, updatedAt: new Date().toISOString() } : g
+      )
     );
-    await this.saveAll(updated);
-    return updated;
   }
 
   static async withdraw(id: string, amount: number): Promise<Goal[]> {
-    const all = await this.getAll();
-    const updated = all.map((g) =>
-      g.id === id ? { ...g, currentAmount: Math.max(0, g.currentAmount - amount), updatedAt: new Date().toISOString() } : g
+    return this.mutate((all) =>
+      all.map((g) =>
+        g.id === id
+          ? { ...g, currentAmount: Math.max(0, g.currentAmount - amount), updatedAt: new Date().toISOString() }
+          : g
+      )
     );
-    await this.saveAll(updated);
-    return updated;
   }
 
   static async delete(id: string): Promise<Goal[]> {
-    const all = await this.getAll();
-    const updated = all.filter((g) => g.id !== id);
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => all.filter((g) => g.id !== id));
   }
 }

@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RecurringDebit } from './types';
+import { withStorageLock } from '../../core/storageLock';
 
 const RECURRINGS_STORAGE_KEY = '@financas:recurrings_v1';
 
@@ -26,33 +27,35 @@ export class RecurringRepository {
     await AsyncStorage.setItem(RECURRINGS_STORAGE_KEY, JSON.stringify(recurrings));
   }
 
+  // Ler -> alterar -> gravar sob trava (evita sobrescrita concorrente com a sincronização)
+  static mutate(fn: (all: RecurringDebit[]) => RecurringDebit[]): Promise<RecurringDebit[]> {
+    return withStorageLock(RECURRINGS_STORAGE_KEY, async () => {
+      const updated = fn(await this.getAll());
+      await this.saveAll(updated);
+      return updated;
+    });
+  }
+
   static async add(item: RecurringDebit): Promise<RecurringDebit[]> {
     const rec: RecurringDebit = {
       ...item,
       updatedAt: item.updatedAt || new Date().toISOString(),
     };
-    const all = await this.getAll();
-    const updated = [rec, ...all.filter((r) => r.id !== rec.id)];
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => [rec, ...all.filter((r) => r.id !== rec.id)]);
   }
 
   static async togglePaid(id: string): Promise<RecurringDebit[]> {
-    const all = await this.getAll();
-    const updated = all.map((r) =>
-      r.id === id ? { ...r, isPaidCurrentMonth: !r.isPaidCurrentMonth, updatedAt: new Date().toISOString() } : r
+    return this.mutate((all) =>
+      all.map((r) =>
+        r.id === id ? { ...r, isPaidCurrentMonth: !r.isPaidCurrentMonth, updatedAt: new Date().toISOString() } : r
+      )
     );
-    await this.saveAll(updated);
-    return updated;
   }
 
   static async updateAmount(id: string, newAmount: number): Promise<RecurringDebit[]> {
-    const all = await this.getAll();
-    const updated = all.map((r) =>
-      r.id === id ? { ...r, amount: newAmount, updatedAt: new Date().toISOString() } : r
+    return this.mutate((all) =>
+      all.map((r) => (r.id === id ? { ...r, amount: newAmount, updatedAt: new Date().toISOString() } : r))
     );
-    await this.saveAll(updated);
-    return updated;
   }
 
   static async update(item: RecurringDebit): Promise<RecurringDebit[]> {
@@ -60,16 +63,10 @@ export class RecurringRepository {
       ...item,
       updatedAt: new Date().toISOString(),
     };
-    const all = await this.getAll();
-    const updated = all.map((r) => (r.id === rec.id ? rec : r));
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => all.map((r) => (r.id === rec.id ? rec : r)));
   }
 
   static async delete(id: string): Promise<RecurringDebit[]> {
-    const all = await this.getAll();
-    const updated = all.filter((r) => r.id !== id);
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => all.filter((r) => r.id !== id));
   }
 }

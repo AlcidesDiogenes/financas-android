@@ -421,7 +421,25 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                           style: 'destructive',
                           onPress: async () => {
                             setStatusMessage('Salvando alterações e desconectando...');
-                            await signOut();
+                            const res = await signOut();
+                            if (res.success) return;
+                            setStatusMessage('');
+                            // Há alterações que não chegaram à nuvem: sair agora as descartaria
+                            Alert.alert(
+                              'Alterações não enviadas',
+                              `Há ${res.pendingCount} alteração(ões) que ainda não chegaram à nuvem. Conecte-se à internet e tente sair novamente. Se sair agora, essas alterações serão perdidas.`,
+                              [
+                                { text: 'Cancelar', style: 'cancel' },
+                                {
+                                  text: 'Sair mesmo assim',
+                                  style: 'destructive',
+                                  onPress: async () => {
+                                    setStatusMessage('Desconectando...');
+                                    await signOut({ force: true });
+                                  },
+                                },
+                              ]
+                            );
                           },
                         },
                       ]

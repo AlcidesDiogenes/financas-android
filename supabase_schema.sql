@@ -164,6 +164,11 @@ ALTER TABLE public.budgets ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TI
 
 ALTER TABLE public.goals ADD COLUMN IF NOT EXISTS updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW();
 
+-- Campos sincronizados a partir da correção de sincronização (supabase_sync_fix.sql)
+ALTER TABLE public.recurrings ADD COLUMN IF NOT EXISTS is_paused BOOLEAN DEFAULT FALSE;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS assigned_to TEXT;
+ALTER TABLE public.transactions ADD COLUMN IF NOT EXISTS is_recurring_generated BOOLEAN DEFAULT FALSE;
+
 -- Índices de busca rápida (garante velocidade sem depender de colunas ausentes)
 CREATE INDEX IF NOT EXISTS idx_transactions_workspace_date ON public.transactions(workspace_id, date DESC);
 CREATE INDEX IF NOT EXISTS idx_recurrings_workspace ON public.recurrings(workspace_id);

@@ -1,10 +1,12 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SupabaseService } from './supabaseClient';
+import { SyncOperation, SyncQueue, SyncQueueEntry, SyncTable, syncQueueKey } from './SyncQueue';
+import { withStorageLock } from '../../core/storageLock';
 import { TransactionRepository } from '../../modules/transactions/repository';
 import { RecurringRepository } from '../../modules/recurrings/repository';
 import { RecurringMonthRepository } from '../../modules/recurrings/monthRepository';
 import { BudgetRepository } from '../../modules/budgets/repository';
 import { GoalRepository } from '../../modules/goals/repository';
-import { WorkspaceRepository } from '../../modules/workspaces/repository';
 import { Transaction } from '../../modules/transactions/types';
 import { RecurringDebit, RecurringMonthRecord } from '../../modules/recurrings/types';
 import { Budget } from '../../modules/budgets/types';
@@ -65,6 +67,262 @@ export function decodeRecurringNotes(rawNotes?: string | null): {
   return { userNotes, monthlyOverrides, excludedMonths };
 }
 
+// Linhas vindas do Supabase não são tipadas (cliente sem tipos gerados do banco)
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type CloudRow = any;
+type PushResult = 'ok' | 'transient' | 'permanent';
+
+interface RowContext {
+  personalWsId: string;
+  userEmail: string | null;
+}
+
+interface PendingSets {
+  upsert: Set<string>;
+  delete: Set<string>;
+}
+
+// Recusas definitivas do banco (permissão/RLS, chave estrangeira, restrições e dados inválidos):
+// não adianta tentar de novo; a versão da nuvem prevalece na próxima sincronização.
+const PERMANENT_ERROR_CODE = /^(42501|23\d{3}|22\d{3})$/;
+
+const classifyError = (error: { code?: string } | null): PushResult => {
+  if (!error) return 'ok';
+  return error.code && PERMANENT_ERROR_CODE.test(error.code) ? 'permanent' : 'transient';
+};
+
+// Ordem de envio respeitando as chaves estrangeiras (recorrente antes do registro mensal)
+const UPSERT_ORDER: SyncTable[] = ['transactions', 'recurrings', 'recurring_month_records', 'budgets', 'goals'];
+const DELETE_ORDER: SyncTable[] = [...UPSERT_ORDER].reverse();
+
+const BOOTSTRAP_KEY_PREFIX = '@financas:sync_bootstrap_v1:';
+const FLUSH_LOCK_KEY = '@financas:sync_flush';
+const PAGE_SIZE = 1000; // limite padrão de linhas por consulta no Supabase
+const UPSERT_CHUNK = 500;
+
+const mapWorkspaceId = (wsId: string | undefined, personalWsId: string): string =>
+  !wsId || wsId === 'ws-solo' ? personalWsId : wsId;
+
+const toTime = (value?: string): number => {
+  const time = value ? new Date(value).getTime() : 0;
+  return isNaN(time) ? 0 : time;
+};
+
+// ---------- Local -> nuvem ----------
+const transactionToRow = (t: Transaction, ctx: RowContext) => ({
+  id: t.id,
+  workspace_id: mapWorkspaceId(t.workspaceId, ctx.personalWsId),
+  title: t.title,
+  amount: t.amount,
+  type: t.type,
+  category: t.category,
+  date: t.date,
+  notes: t.notes ?? null,
+  created_by: t.createdBy || ctx.userEmail || null,
+  assigned_to: t.assignedTo || null,
+  is_recurring_generated: !!t.isRecurringGenerated,
+  updated_at: t.updatedAt || t.date || new Date().toISOString(),
+});
+
+const recurringToRow = (r: RecurringDebit, ctx: RowContext) => ({
+  id: r.id,
+  workspace_id: mapWorkspaceId(r.workspaceId, ctx.personalWsId),
+  title: r.title,
+  amount: r.amount,
+  type: r.type || 'expense',
+  category: r.category,
+  frequency: r.frequency,
+  due_day: r.dueDay,
+  is_paid_current_month: r.isPaidCurrentMonth,
+  reminder_enabled: r.reminderEnabled,
+  assigned_to: r.assignedTo || null,
+  start_date: r.startDate || null,
+  end_date: r.endDate || null,
+  is_paused: !!r.isPaused,
+  notes: encodeRecurringNotes(r.notes, r.monthlyOverrides, r.excludedMonths),
+  updated_at: r.updatedAt || r.createdAt || new Date().toISOString(),
+});
+
+const monthRecordToRow = (m: RecurringMonthRecord, ctx: RowContext) => ({
+  id: m.id,
+  recurring_id: m.recurringId,
+  workspace_id: mapWorkspaceId(m.workspaceId, ctx.personalWsId),
+  month: m.month,
+  year: m.year,
+  year_month: `${m.year}-${String(m.month).padStart(2, '0')}`,
+  amount: m.amount,
+  is_paid: m.isPaid,
+  paid_at: m.paidAt || null,
+  transaction_id: m.transactionId || null,
+  updated_at: m.updatedAt || new Date().toISOString(),
+});
+
+const budgetToRow = (b: Budget, ctx: RowContext) => ({
+  id: b.id,
+  workspace_id: mapWorkspaceId(b.workspaceId, ctx.personalWsId),
+  category: b.category,
+  limit_amount: b.limitAmount,
+  month: b.month,
+  year: b.year,
+  start_date: b.startDate || null,
+  end_date: b.endDate || null,
+  updated_at: b.updatedAt || new Date().toISOString(),
+});
+
+const goalToRow = (g: Goal, ctx: RowContext) => ({
+  id: g.id,
+  workspace_id: mapWorkspaceId(g.workspaceId, ctx.personalWsId),
+  title: g.title,
+  target_amount: g.targetAmount,
+  current_amount: g.currentAmount,
+  deadline_date: g.deadlineDate,
+  icon: g.icon,
+  color: g.color,
+  notes: g.notes ?? null,
+  updated_at: g.updatedAt || g.createdAt || new Date().toISOString(),
+});
+
+// ---------- Nuvem -> local ----------
+const rowToTransaction = (row: CloudRow): Transaction => ({
+  id: row.id,
+  workspaceId: row.workspace_id,
+  title: row.title,
+  amount: parseFloat(row.amount),
+  type: row.type,
+  category: row.category,
+  date: row.date,
+  notes: row.notes ?? undefined,
+  createdBy: row.created_by ?? undefined,
+  assignedTo: row.assigned_to ?? undefined,
+  isRecurringGenerated: !!row.is_recurring_generated,
+  updatedAt: row.updated_at || row.created_at || row.date,
+});
+
+const rowToRecurring = (row: CloudRow): RecurringDebit => {
+  const { userNotes, monthlyOverrides, excludedMonths } = decodeRecurringNotes(row.notes);
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    amount: parseFloat(row.amount),
+    type: row.type || 'expense',
+    category: row.category,
+    frequency: row.frequency,
+    dueDay: row.due_day,
+    isPaidCurrentMonth: row.is_paid_current_month,
+    reminderEnabled: row.reminder_enabled,
+    assignedTo: row.assigned_to ?? undefined,
+    startDate: row.start_date ?? undefined,
+    endDate: row.end_date ?? undefined,
+    isPaused: !!row.is_paused,
+    notes: userNotes,
+    monthlyOverrides,
+    excludedMonths,
+    createdAt: row.created_at,
+    updatedAt: row.updated_at || row.created_at,
+  };
+};
+
+const rowToMonthRecord = (row: CloudRow): RecurringMonthRecord => {
+  let monthNum = row.month;
+  let yearNum = row.year;
+  if ((!monthNum || !yearNum) && row.year_month) {
+    const parts = String(row.year_month).split('-');
+    yearNum = parseInt(parts[0], 10);
+    monthNum = parseInt(parts[1], 10);
+  }
+  const parsedAmount = parseFloat(row.amount);
+  return {
+    id: row.id,
+    recurringId: row.recurring_id,
+    workspaceId: row.workspace_id,
+    month: monthNum || 1,
+    year: yearNum || new Date().getFullYear(),
+    amount: isNaN(parsedAmount) ? 0 : parsedAmount,
+    isPaid: !!row.is_paid,
+    paidAt: row.paid_at ?? undefined,
+    transactionId: row.transaction_id ?? undefined,
+    updatedAt: row.updated_at ?? undefined,
+  };
+};
+
+const rowToBudget = (row: CloudRow): Budget => ({
+  id: row.id,
+  workspaceId: row.workspace_id,
+  category: row.category,
+  limitAmount: parseFloat(row.limit_amount),
+  month: row.month,
+  year: row.year,
+  startDate: row.start_date ?? undefined,
+  endDate: row.end_date ?? undefined,
+  updatedAt: row.updated_at ?? undefined,
+});
+
+const rowToGoal = (row: CloudRow): Goal => ({
+  id: row.id,
+  workspaceId: row.workspace_id,
+  title: row.title,
+  targetAmount: parseFloat(row.target_amount),
+  currentAmount: parseFloat(row.current_amount),
+  deadlineDate: row.deadline_date,
+  icon: row.icon,
+  color: row.color,
+  notes: row.notes ?? undefined,
+  createdAt: row.created_at,
+  updatedAt: row.updated_at || row.created_at,
+});
+
+// ---------- Merge ----------
+interface MergeOptions<T extends { id: string; workspaceId: string }> {
+  table: SyncTable;
+  local: T[];
+  cloud: T[];
+  personalWsId: string;
+  allowed: Set<string>;
+  pending: PendingSets;
+  fetchStartedAt: number;
+  timestamp: (item: T) => number;
+  keepLocal?: (item: T) => boolean;
+  combine?: (local: T, cloud: T) => T;
+}
+
+// A nuvem é a referência. Do lado local só sobrevivem:
+// - alterações ainda na fila de envio (pendentes);
+// - itens mais novos que a cópia da nuvem (alterados durante a sincronização).
+// Item local ausente na nuvem e sem envio pendente foi excluído em outro aparelho e sai.
+function mergeById<T extends { id: string; workspaceId: string }>(o: MergeOptions<T>): T[] {
+  const result = new Map<string, T>();
+  const localById = new Map<string, T>();
+
+  for (const item of o.local) {
+    if (o.keepLocal && !o.keepLocal(item)) continue;
+    const mapped: T = { ...item, workspaceId: mapWorkspaceId(item.workspaceId, o.personalWsId) };
+    const isPending = o.pending.upsert.has(syncQueueKey(o.table, item.id));
+    if (!isPending && !o.allowed.has(mapped.workspaceId)) continue;
+    localById.set(item.id, mapped);
+    if (isPending || o.timestamp(mapped) >= o.fetchStartedAt) {
+      result.set(item.id, mapped);
+    }
+  }
+
+  for (const cloudItem of o.cloud) {
+    if (!o.allowed.has(cloudItem.workspaceId)) continue;
+    const key = syncQueueKey(o.table, cloudItem.id);
+    if (o.pending.delete.has(key) || o.pending.upsert.has(key)) continue;
+
+    const localItem = localById.get(cloudItem.id);
+    if (localItem && o.timestamp(localItem) > o.timestamp(cloudItem)) {
+      result.set(cloudItem.id, localItem);
+      continue;
+    }
+    result.set(cloudItem.id, localItem && o.combine ? o.combine(localItem, cloudItem) : cloudItem);
+  }
+
+  return Array.from(result.values());
+}
+
+type CloudClient = Awaited<ReturnType<typeof SupabaseService.getClient>>;
+
 export class CloudSyncService {
   private static async getAuthenticatedClient() {
     try {
@@ -94,419 +352,225 @@ export class CloudSyncService {
     }
   }
 
-  // Helper seguro para tentar upsert com updated_at e fallback sem updated_at se a coluna ainda não existir
-  private static async safeUpsert(client: any, table: string, recordWithUpdated: any, recordWithoutUpdated: any) {
-    try {
-      const { error } = await client.from(table).upsert(recordWithUpdated);
-      if (error) {
-        await client.from(table).upsert(recordWithoutUpdated);
-      }
-    } catch {
-      try {
-        await client.from(table).upsert(recordWithoutUpdated);
-      } catch {}
-    }
-  }
+  // ---------- Envio (fila de pendências) ----------
 
-  // Background single-item automatic mutations (only if authenticated)
-  static async autoUpsertTransaction(t: Transaction): Promise<void> {
+  // Grava a operação na fila e tenta enviar na hora; se falhar, ela fica para a próxima tentativa.
+  private static async queueAndFlush(table: SyncTable, id: string, op: SyncOperation): Promise<void> {
     try {
       const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      const personalWsId = `ws-${auth.user.id}`;
-      const wsId = (!t.workspaceId || t.workspaceId === 'ws-solo') ? personalWsId : t.workspaceId;
-      const base = {
-        id: t.id,
-        workspace_id: wsId,
-        title: t.title,
-        amount: t.amount,
-        type: t.type,
-        category: t.category,
-        date: t.date,
-        notes: t.notes,
-        created_by: t.createdBy || auth.user.email || null,
-      };
-      await this.safeUpsert(auth.client, 'transactions', { ...base, updated_at: t.updatedAt || new Date().toISOString() }, base);
+      if (!auth) return; // modo visitante: sem nuvem
+      await SyncQueue.enqueue(table, id, op);
+      await this.flushQueue();
     } catch {}
+  }
+
+  static async autoUpsertTransaction(t: Transaction): Promise<void> {
+    await this.queueAndFlush('transactions', t.id, 'upsert');
   }
 
   static async autoDeleteTransaction(id: string): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      await auth.client.from('transactions').delete().eq('id', id);
-    } catch {}
+    await this.queueAndFlush('transactions', id, 'delete');
   }
 
   static async autoUpsertRecurring(r: RecurringDebit): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      const personalWsId = `ws-${auth.user.id}`;
-      const wsId = (!r.workspaceId || r.workspaceId === 'ws-solo') ? personalWsId : r.workspaceId;
-      const base = {
-        id: r.id,
-        workspace_id: wsId,
-        title: r.title,
-        amount: r.amount,
-        type: r.type || 'expense',
-        category: r.category,
-        frequency: r.frequency,
-        due_day: r.dueDay,
-        is_paid_current_month: r.isPaidCurrentMonth,
-        reminder_enabled: r.reminderEnabled,
-        assigned_to: r.assignedTo || null,
-        start_date: r.startDate || null,
-        end_date: r.endDate || null,
-        notes: encodeRecurringNotes(r.notes, r.monthlyOverrides, r.excludedMonths),
-      };
-      await this.safeUpsert(auth.client, 'recurrings', { ...base, updated_at: r.updatedAt || new Date().toISOString() }, base);
-    } catch {}
+    await this.queueAndFlush('recurrings', r.id, 'upsert');
   }
 
   static async autoDeleteRecurring(id: string): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      await auth.client.from('recurrings').delete().eq('id', id);
-    } catch {}
+    await this.queueAndFlush('recurrings', id, 'delete');
   }
 
   static async autoUpsertRecurringMonthRecord(rec: RecurringMonthRecord): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      const personalWsId = `ws-${auth.user.id}`;
-      const wsId = (!rec.workspaceId || rec.workspaceId === 'ws-solo') ? personalWsId : rec.workspaceId;
-      const ym = `${rec.year}-${String(rec.month).padStart(2, '0')}`;
-      const baseFull = {
-        id: rec.id,
-        recurring_id: rec.recurringId,
-        workspace_id: wsId,
-        month: rec.month,
-        year: rec.year,
-        year_month: ym,
-        amount: rec.amount,
-        is_paid: rec.isPaid,
-        paid_at: rec.paidAt || null,
-        transaction_id: rec.transactionId || null,
-      };
-      const baseFallback = {
-        id: rec.id,
-        recurring_id: rec.recurringId,
-        workspace_id: wsId,
-        month: rec.month,
-        year: rec.year,
-        year_month: ym,
-        is_paid: rec.isPaid,
-        paid_at: rec.paidAt || null,
-      };
-
-      const nowIso = rec.updatedAt || new Date().toISOString();
-      try {
-        const { error } = await auth.client.from('recurring_month_records').upsert({ ...baseFull, updated_at: nowIso });
-        if (!error) return;
-      } catch {}
-
-      try {
-        const { error } = await auth.client.from('recurring_month_records').upsert(baseFull);
-        if (!error) return;
-      } catch {}
-
-      try {
-        const { error } = await auth.client.from('recurring_month_records').upsert({ ...baseFallback, updated_at: nowIso });
-        if (!error) return;
-      } catch {}
-
-      await auth.client.from('recurring_month_records').upsert(baseFallback);
-    } catch {}
+    await this.queueAndFlush('recurring_month_records', rec.id, 'upsert');
   }
 
   static async autoDeleteRecurringMonthRecord(id: string): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      await auth.client.from('recurring_month_records').delete().eq('id', id);
-    } catch {}
+    await this.queueAndFlush('recurring_month_records', id, 'delete');
   }
 
   static async autoUpsertBudget(b: Budget): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      const personalWsId = `ws-${auth.user.id}`;
-      const wsId = (!b.workspaceId || b.workspaceId === 'ws-solo') ? personalWsId : b.workspaceId;
-      const base = {
-        id: b.id,
-        workspace_id: wsId,
-        category: b.category,
-        limit_amount: b.limitAmount,
-        month: b.month,
-        year: b.year,
-        start_date: b.startDate || null,
-        end_date: b.endDate || null,
-      };
-      await this.safeUpsert(auth.client, 'budgets', { ...base, updated_at: b.updatedAt || new Date().toISOString() }, base);
-    } catch {}
+    await this.queueAndFlush('budgets', b.id, 'upsert');
   }
 
   static async autoDeleteBudget(id: string): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      await auth.client.from('budgets').delete().eq('id', id);
-    } catch {}
+    await this.queueAndFlush('budgets', id, 'delete');
   }
 
   static async autoUpsertGoal(g: Goal): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      const personalWsId = `ws-${auth.user.id}`;
-      const wsId = (!g.workspaceId || g.workspaceId === 'ws-solo') ? personalWsId : g.workspaceId;
-      const base = {
-        id: g.id,
-        workspace_id: wsId,
-        title: g.title,
-        target_amount: g.targetAmount,
-        current_amount: g.currentAmount,
-        deadline_date: g.deadlineDate,
-        icon: g.icon,
-        color: g.color,
-        notes: g.notes,
-      };
-      await this.safeUpsert(auth.client, 'goals', { ...base, updated_at: g.updatedAt || new Date().toISOString() }, base);
-    } catch {}
+    await this.queueAndFlush('goals', g.id, 'upsert');
   }
 
   static async autoDeleteGoal(id: string): Promise<void> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return;
-      await auth.client.from('goals').delete().eq('id', id);
-    } catch {}
+    await this.queueAndFlush('goals', id, 'delete');
   }
 
-  // Consulta sob demanda paginada por período para relatórios de longo prazo
-  static async fetchTransactionsByPeriod(
-    workspaceId: string,
-    startDate: string,
-    endDate: string
-  ): Promise<Transaction[]> {
-    try {
-      const auth = await this.getAuthenticatedClient();
-      if (!auth) return [];
-      const { data, error } = await auth.client
-        .from('transactions')
-        .select('*')
-        .eq('workspace_id', workspaceId)
-        .gte('date', startDate)
-        .lte('date', endDate)
-        .order('date', { ascending: false });
-
-      if (error || !Array.isArray(data)) return [];
-      return data.map((row) => ({
-        id: row.id,
-        workspaceId: row.workspace_id,
-        title: row.title,
-        amount: parseFloat(row.amount),
-        type: row.type,
-        category: row.category,
-        date: row.date,
-        notes: row.notes,
-        createdBy: row.created_by,
-        updatedAt: row.updated_at || row.created_at || row.date,
-      }));
-    } catch {
-      return [];
-    }
+  static async getPendingCount(): Promise<number> {
+    return SyncQueue.count();
   }
 
-  static async syncLocalToCloud(): Promise<{ success: boolean; message: string }> {
-    try {
+  // Envia tudo o que está na fila. Devolve quantas operações continuam pendentes.
+  static flushQueue(): Promise<number> {
+    return withStorageLock(FLUSH_LOCK_KEY, async () => {
+      const entries = await SyncQueue.getAll();
+      if (entries.length === 0) return 0;
+
       const auth = await this.getAuthenticatedClient();
-      if (!auth) {
-        return { success: false, message: 'Nenhuma conta conectada. Sincronização offline desabilitada.' };
-      }
+      if (!auth) return entries.length;
 
-      const client = auth.client;
-      const user = auth.user;
-      const personalWsId = `ws-${user.id}`;
-      const sanitizeWsId = (wsId?: string) => (!wsId || wsId === 'ws-solo') ? personalWsId : wsId;
+      const ctx: RowContext = {
+        personalWsId: `ws-${auth.user.id}`,
+        userEmail: auth.user.email || null,
+      };
+      const done: SyncQueueEntry[] = [];
+      const recurringsStillPending = new Set<string>();
 
-      const [workspaces, transactions, recurrings, monthRecords, budgets, goals] = await Promise.all([
-        WorkspaceRepository.getWorkspaces(),
-        TransactionRepository.getAll(),
-        RecurringRepository.getAll(),
-        RecurringMonthRepository.getAll(),
-        BudgetRepository.getAll(),
-        GoalRepository.getAll(),
-      ]);
+      for (const table of UPSERT_ORDER) {
+        const upserts = entries.filter((e) => e.table === table && e.op === 'upsert');
+        if (upserts.length === 0) continue;
 
-      if (workspaces.length > 0) {
-        // Só o dono pode alterar o espaço na nuvem (RLS); enviar espaços de terceiros
-        // faria o lote inteiro ser recusado.
-        const userEmail = (user.email || '').toLowerCase().trim();
-        const validWorkspaces = workspaces
-          .filter((w) => w.id !== 'ws-solo')
-          .filter(
-            (w) =>
-              w.type === 'solo' ||
-              w.members.some(
-                (m) =>
-                  m.role === 'owner' &&
-                  (m.isCurrentUser || (!!userEmail && m.email.toLowerCase().trim() === userEmail))
-              )
-          )
-          .map((w) => ({
-            id: w.type === 'solo' ? personalWsId : w.id,
-            name: w.name,
-            description: w.description,
-            type: w.type,
-            invite_code: w.inviteCode,
-            created_at: w.createdAt,
-          }));
-
-        if (validWorkspaces.length > 0) {
-          await client.from('workspaces').upsert(validWorkspaces);
-        }
-      }
-
-      if (transactions.length > 0) {
-        const txBase = transactions.map((t) => ({
-          id: t.id,
-          workspace_id: sanitizeWsId(t.workspaceId),
-          title: t.title,
-          amount: t.amount,
-          type: t.type,
-          category: t.category,
-          date: t.date,
-          notes: t.notes,
-          created_by: t.createdBy || user.email || null,
-        }));
-        const txWithUpdated = transactions.map((t, idx) => ({
-          ...txBase[idx],
-          updated_at: t.updatedAt || t.date || new Date().toISOString(),
-        }));
-        await this.safeUpsert(client, 'transactions', txWithUpdated, txBase);
-      }
-
-      if (recurrings.length > 0) {
-        const recBase = recurrings.map((r) => ({
-          id: r.id,
-          workspace_id: sanitizeWsId(r.workspaceId),
-          title: r.title,
-          amount: r.amount,
-          type: r.type || 'expense',
-          category: r.category,
-          frequency: r.frequency,
-          due_day: r.dueDay,
-          is_paid_current_month: r.isPaidCurrentMonth,
-          reminder_enabled: r.reminderEnabled,
-          assigned_to: r.assignedTo || null,
-          start_date: r.startDate || null,
-          end_date: r.endDate || null,
-          notes: encodeRecurringNotes(r.notes, r.monthlyOverrides, r.excludedMonths),
-        }));
-        const recWithUpdated = recurrings.map((r, idx) => ({
-          ...recBase[idx],
-          updated_at: r.updatedAt || r.createdAt || new Date().toISOString(),
-        }));
-        await this.safeUpsert(client, 'recurrings', recWithUpdated, recBase);
-      }
-
-      if (monthRecords.length > 0) {
-        const mrFull = monthRecords.map((m) => {
-          const ym = `${m.year}-${String(m.month).padStart(2, '0')}`;
-          return {
-            id: m.id,
-            recurring_id: m.recurringId,
-            workspace_id: sanitizeWsId(m.workspaceId),
-            month: m.month,
-            year: m.year,
-            year_month: ym,
-            amount: m.amount,
-            is_paid: m.isPaid,
-            paid_at: m.paidAt || null,
-            transaction_id: m.transactionId || null,
-          };
-        });
-        const mrFallback = monthRecords.map((m) => {
-          const ym = `${m.year}-${String(m.month).padStart(2, '0')}`;
-          return {
-            id: m.id,
-            recurring_id: m.recurringId,
-            workspace_id: sanitizeWsId(m.workspaceId),
-            month: m.month,
-            year: m.year,
-            year_month: ym,
-            is_paid: m.isPaid,
-            paid_at: m.paidAt || null,
-          };
-        });
-        const mrWithUpdated = monthRecords.map((m, idx) => ({
-          ...mrFull[idx],
-          updated_at: m.updatedAt || new Date().toISOString(),
-        }));
-
-        try {
-          const { error } = await client.from('recurring_month_records').upsert(mrWithUpdated);
-          if (error) {
-            const { error: err2 } = await client.from('recurring_month_records').upsert(mrFull);
-            if (err2) {
-              await client.from('recurring_month_records').upsert(mrFallback);
-            }
+        const localRows = await this.buildLocalRows(table, ctx);
+        const toSend: { entry: SyncQueueEntry; row: Record<string, unknown> }[] = [];
+        for (const entry of upserts) {
+          const row = localRows.get(entry.id);
+          if (!row) {
+            done.push(entry); // não existe mais no aparelho: nada a enviar
+          } else if (
+            table === 'recurring_month_records' &&
+            recurringsStillPending.has(String(row.recurring_id))
+          ) {
+            // A recorrente ainda não chegou à nuvem: aguarda para não violar a chave estrangeira
+          } else {
+            toSend.push({ entry, row });
           }
-        } catch {
+        }
+
+        const results = await this.pushRows(auth.client, table, toSend.map((s) => s.row));
+        toSend.forEach((s, idx) => {
+          if (results[idx] === 'transient') {
+            if (table === 'recurrings') recurringsStillPending.add(s.entry.id);
+          } else {
+            done.push(s.entry);
+          }
+        });
+      }
+
+      for (const table of DELETE_ORDER) {
+        for (const entry of entries.filter((e) => e.table === table && e.op === 'delete')) {
           try {
-            await client.from('recurring_month_records').upsert(mrFallback);
+            const { error } = await auth.client.from(table).delete().eq('id', entry.id);
+            if (classifyError(error) !== 'transient') done.push(entry);
           } catch {}
         }
       }
 
-      if (budgets.length > 0) {
-        const bdgBase = budgets.map((b) => ({
-          id: b.id,
-          workspace_id: sanitizeWsId(b.workspaceId),
-          category: b.category,
-          limit_amount: b.limitAmount,
-          month: b.month,
-          year: b.year,
-          start_date: b.startDate || null,
-          end_date: b.endDate || null,
-        }));
-        const bdgWithUpdated = budgets.map((b, idx) => ({
-          ...bdgBase[idx],
-          updated_at: b.updatedAt || new Date().toISOString(),
-        }));
-        await this.safeUpsert(client, 'budgets', bdgWithUpdated, bdgBase);
+      await SyncQueue.removeSent(done);
+      return SyncQueue.count();
+    });
+  }
+
+  private static async buildLocalRows(
+    table: SyncTable,
+    ctx: RowContext
+  ): Promise<Map<string, Record<string, unknown>>> {
+    switch (table) {
+      case 'transactions':
+        return new Map((await TransactionRepository.getAll()).map((t) => [t.id, transactionToRow(t, ctx)]));
+      case 'recurrings':
+        return new Map((await RecurringRepository.getAll()).map((r) => [r.id, recurringToRow(r, ctx)]));
+      case 'recurring_month_records':
+        return new Map((await RecurringMonthRepository.getAll()).map((m) => [m.id, monthRecordToRow(m, ctx)]));
+      case 'budgets':
+        return new Map((await BudgetRepository.getAll()).map((b) => [b.id, budgetToRow(b, ctx)]));
+      case 'goals':
+        return new Map((await GoalRepository.getAll()).map((g) => [g.id, goalToRow(g, ctx)]));
+    }
+  }
+
+  // Envia em lotes; se um lote for recusado pelo banco, isola linha a linha
+  // para que uma única linha inválida não derrube as demais.
+  private static async pushRows(
+    client: CloudClient,
+    table: SyncTable,
+    rows: Record<string, unknown>[]
+  ): Promise<PushResult[]> {
+    const results: PushResult[] = [];
+    for (let i = 0; i < rows.length; i += UPSERT_CHUNK) {
+      const chunk = rows.slice(i, i + UPSERT_CHUNK);
+      let batchError: { code?: string } | null;
+      try {
+        const { error } = await client.from(table).upsert(chunk);
+        batchError = error;
+      } catch {
+        batchError = { code: '' };
       }
 
-      if (goals.length > 0) {
-        const goalBase = goals.map((g) => ({
-          id: g.id,
-          workspace_id: sanitizeWsId(g.workspaceId),
-          title: g.title,
-          target_amount: g.targetAmount,
-          current_amount: g.currentAmount,
-          deadline_date: g.deadlineDate,
-          icon: g.icon,
-          color: g.color,
-          notes: g.notes,
-        }));
-        const goalWithUpdated = goals.map((g, idx) => ({
-          ...goalBase[idx],
-          updated_at: g.updatedAt || g.createdAt || new Date().toISOString(),
-        }));
-        await this.safeUpsert(client, 'goals', goalWithUpdated, goalBase);
+      const batchResult = classifyError(batchError);
+      if (batchResult === 'ok' || batchResult === 'transient' || chunk.length === 1) {
+        results.push(...chunk.map(() => batchResult));
+        continue;
       }
 
-      return {
-        success: true,
-        message: 'Nuvem sincronizada com sucesso!',
-      };
-    } catch (e: any) {
-      return { success: false, message: `Erro ao sincronizar: ${e?.message}` };
+      for (const row of chunk) {
+        try {
+          const { error } = await client.from(table).upsert(row);
+          results.push(classifyError(error));
+        } catch {
+          results.push('transient');
+        }
+      }
+    }
+    return results;
+  }
+
+  // Na primeira sincronização desta versão, coloca na fila tudo o que existe no aparelho.
+  // Garante que dados que nunca subiram (falhas antigas) cheguem à nuvem antes que a
+  // sincronização passe a remover itens ausentes na nuvem.
+  private static async ensureBootstrap(userId: string): Promise<void> {
+    const key = `${BOOTSTRAP_KEY_PREFIX}${userId}`;
+    if (await AsyncStorage.getItem(key)) return;
+
+    const [transactions, recurrings, monthRecords, budgets, goals] = await Promise.all([
+      TransactionRepository.getAll(),
+      RecurringRepository.getAll(),
+      RecurringMonthRepository.getAll(),
+      BudgetRepository.getAll(),
+      GoalRepository.getAll(),
+    ]);
+    const op: SyncOperation = 'upsert';
+    await SyncQueue.enqueueMany([
+      ...transactions.map((t) => ({ table: 'transactions' as const, id: t.id, op })),
+      ...recurrings.map((r) => ({ table: 'recurrings' as const, id: r.id, op })),
+      ...monthRecords.map((m) => ({ table: 'recurring_month_records' as const, id: m.id, op })),
+      ...budgets.map((b) => ({ table: 'budgets' as const, id: b.id, op })),
+      ...goals.map((g) => ({ table: 'goals' as const, id: g.id, op })),
+    ]);
+    await AsyncStorage.setItem(key, new Date().toISOString());
+  }
+
+  // ---------- Download ----------
+
+  // Lê todas as linhas paginando (o Supabase devolve no máximo 1000 por consulta).
+  // Devolve null se qualquer página falhar, para que a tabela não seja reconciliada pela metade.
+  private static async fetchAllRows(
+    client: CloudClient,
+    table: SyncTable,
+    workspaceIds: string[]
+  ): Promise<CloudRow[] | null> {
+    const rows: CloudRow[] = [];
+    try {
+      for (let from = 0; ; from += PAGE_SIZE) {
+        const { data, error } = await client
+          .from(table)
+          .select('*')
+          .in('workspace_id', workspaceIds)
+          .order('id', { ascending: true })
+          .range(from, from + PAGE_SIZE - 1);
+        if (error || !Array.isArray(data)) return null;
+        rows.push(...data);
+        if (data.length < PAGE_SIZE) return rows;
+      }
+    } catch {
+      return null;
     }
   }
 
@@ -520,337 +584,159 @@ export class CloudSyncService {
       const client = auth.client;
       const user = auth.user;
       const userEmail = user.email?.toLowerCase().trim() || '';
-
-      // Identifica os workspaces dos quais este usuário tem permissão/membro
-      let memberWorkspaceIds: string[] = [];
-      try {
-        const { data: memberRows, error: memberErr } = await client
-          .from('workspace_members')
-          .select('workspace_id, role')
-          .eq('email', userEmail);
-        if (!memberErr && memberRows) {
-          memberWorkspaceIds = memberRows
-            .filter((m) => m.role !== 'pending')
-            .map((m) => m.workspace_id);
-        }
-      } catch {
-        // Se a tabela workspace_members ainda não foi criada no Supabase, continua normalmente
-      }
-
       const personalWsId = `ws-${user.id}`;
-      // NUNCA incluir 'ws-solo' nas permissões da nuvem! Apenas o espaço pessoal exclusivo deste user e os compartilhados onde é membro.
-      const allowedWorkspaceIds = Array.from(new Set([...memberWorkspaceIds, personalWsId]));
 
-      // Consulta otimizada com limite inteligente e ordenação por data
-      const [txRes, recRes, recMonthRes, bdgRes, goalRes] = await Promise.all([
-        client.from('transactions').select('*').in('workspace_id', allowedWorkspaceIds).order('date', { ascending: false }).limit(2000),
-        client.from('recurrings').select('*').in('workspace_id', allowedWorkspaceIds),
-        client.from('recurring_month_records').select('*').in('workspace_id', allowedWorkspaceIds),
-        client.from('budgets').select('*').in('workspace_id', allowedWorkspaceIds),
-        client.from('goals').select('*').in('workspace_id', allowedWorkspaceIds),
+      // 1. Envia antes o que está pendente
+      await this.ensureBootstrap(user.id);
+      await this.flushQueue();
+
+      // 2. Espaços em que o usuário é membro aprovado. Se não der para saber, não reconcilia nada:
+      // sem essa lista, os dados dos espaços compartilhados seriam descartados do aparelho.
+      const { data: memberRows, error: memberErr } = await client
+        .from('workspace_members')
+        .select('workspace_id, role')
+        .eq('email', userEmail);
+      if (memberErr || !Array.isArray(memberRows)) {
+        return { success: false, message: 'Não foi possível verificar seus espaços na nuvem.' };
+      }
+      const allowed = new Set<string>([
+        personalWsId,
+        ...memberRows.filter((m) => m.role !== 'pending').map((m) => String(m.workspace_id)),
+      ]);
+      const allowedIds = Array.from(allowed);
+
+      // 3. Download completo
+      const fetchStartedAt = Date.now();
+      const [txRows, recRows, monthRows, budgetRows, goalRows] = await Promise.all([
+        this.fetchAllRows(client, 'transactions', allowedIds),
+        this.fetchAllRows(client, 'recurrings', allowedIds),
+        this.fetchAllRows(client, 'recurring_month_records', allowedIds),
+        this.fetchAllRows(client, 'budgets', allowedIds),
+        this.fetchAllRows(client, 'goals', allowedIds),
       ]);
 
-      // 1. TRANSAÇÕES: Smart Merge Bidirecional e Purga de Órfãos
-      if (Array.isArray(txRes.data)) {
-        const localTxs = await TransactionRepository.getAll();
-        const mergedMap = new Map<string, Transaction>();
+      // 4. Pendências atuais (protegem alterações locais ainda não enviadas)
+      const queue = await SyncQueue.getAll();
+      const pending: PendingSets = {
+        upsert: new Set(queue.filter((e) => e.op === 'upsert').map((e) => syncQueueKey(e.table, e.id))),
+        delete: new Set(queue.filter((e) => e.op === 'delete').map((e) => syncQueueKey(e.table, e.id))),
+      };
+      const base = { personalWsId, allowed, pending, fetchStartedAt };
 
-        // Começa com os dados locais que pertencem aos workspaces autorizados deste usuário
-        for (const localItem of localTxs) {
-          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
-
-          // Se pertencer ao ws-solo antigo mas tiver createdBy de outro usuário, descarta (vazamento anterior)
-          if (
-            localItem.workspaceId === 'ws-solo' &&
-            localItem.createdBy &&
-            localItem.createdBy.toLowerCase() !== userEmail &&
-            localItem.createdBy !== 'Você'
-          ) {
-            continue;
-          }
-
-          if (allowedWorkspaceIds.includes(mappedWsId)) {
-            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
-          }
-        }
-
-        // Conflito e novidades da nuvem (garantindo filtro estrito)
-        for (const row of txRes.data) {
-          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
-
-          const cloudItem: Transaction = {
-            id: row.id,
-            workspaceId: row.workspace_id,
-            title: row.title,
-            amount: parseFloat(row.amount),
-            type: row.type,
-            category: row.category,
-            date: row.date,
-            notes: row.notes,
-            createdBy: row.created_by,
-            updatedAt: row.updated_at || row.created_at || row.date,
-          };
-
-          const localItem = mergedMap.get(cloudItem.id);
-          if (!localItem) {
-            mergedMap.set(cloudItem.id, cloudItem);
-          } else {
-            const localTimestamp = new Date(localItem.updatedAt || localItem.date || 0).getTime();
-            const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.date || 0).getTime();
-            if (cloudTimestamp >= localTimestamp) {
-              mergedMap.set(cloudItem.id, cloudItem);
-            }
-          }
-        }
-
-        await TransactionRepository.saveAll(Array.from(mergedMap.values()));
+      // 5. Reconciliação tabela a tabela, sob trava do armazenamento local
+      if (txRows) {
+        await TransactionRepository.mutate((local) =>
+          mergeById<Transaction>({
+            ...base,
+            table: 'transactions',
+            local,
+            cloud: txRows.map(rowToTransaction),
+            timestamp: (t) => toTime(t.updatedAt || t.date),
+            // Legado: item do antigo 'ws-solo' criado por outro usuário (vazamento anterior)
+            keepLocal: (t) =>
+              !(
+                t.workspaceId === 'ws-solo' &&
+                t.createdBy &&
+                t.createdBy.toLowerCase() !== userEmail &&
+                t.createdBy !== 'Você'
+              ),
+          })
+        );
       }
 
-      // 2. RECORRENTES: Smart Merge e Purga
-      if (Array.isArray(recRes.data)) {
-        const localRecs = await RecurringRepository.getAll();
-        const mergedMap = new Map<string, RecurringDebit>();
-
-        for (const localItem of localRecs) {
-          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
-          if (allowedWorkspaceIds.includes(mappedWsId)) {
-            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
-          }
-        }
-
-        for (const row of recRes.data) {
-          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
-
-          const { userNotes, monthlyOverrides, excludedMonths } = decodeRecurringNotes(row.notes);
-
-          const cloudItem: RecurringDebit = {
-            id: row.id,
-            workspaceId: row.workspace_id,
-            title: row.title,
-            amount: parseFloat(row.amount),
-            type: row.type || 'expense',
-            category: row.category,
-            frequency: row.frequency,
-            dueDay: row.due_day,
-            isPaidCurrentMonth: row.is_paid_current_month,
-            reminderEnabled: row.reminder_enabled,
-            assignedTo: row.assigned_to,
-            startDate: row.start_date,
-            endDate: row.end_date,
-            notes: userNotes,
-            monthlyOverrides: monthlyOverrides,
-            excludedMonths: excludedMonths,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at || row.created_at,
-          };
-
-          const localItem = mergedMap.get(cloudItem.id);
-          if (!localItem) {
-            mergedMap.set(cloudItem.id, cloudItem);
-          } else {
-            // Unir overrides da nuvem com overrides locais existentes
-            const combinedOverrides = {
-              ...(localItem.monthlyOverrides || {}),
-              ...(cloudItem.monthlyOverrides || {}),
-            };
-            cloudItem.monthlyOverrides = Object.keys(combinedOverrides).length > 0 ? combinedOverrides : undefined;
-
-            const combinedExclusions = Array.from(new Set([
-              ...(localItem.excludedMonths || []),
-              ...(cloudItem.excludedMonths || []),
-            ]));
-            cloudItem.excludedMonths = combinedExclusions.length > 0 ? combinedExclusions : undefined;
-
-            const localTimestamp = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
-            const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.createdAt || 0).getTime();
-            if (cloudTimestamp >= localTimestamp) {
-              mergedMap.set(cloudItem.id, cloudItem);
-            } else {
-              mergedMap.set(cloudItem.id, {
-                ...localItem,
-                monthlyOverrides: cloudItem.monthlyOverrides || localItem.monthlyOverrides,
-                excludedMonths: cloudItem.excludedMonths || localItem.excludedMonths,
-              });
-            }
-          }
-        }
-
-        await RecurringRepository.saveAll(Array.from(mergedMap.values()));
+      if (recRows) {
+        await RecurringRepository.mutate((local) =>
+          mergeById<RecurringDebit>({
+            ...base,
+            table: 'recurrings',
+            local,
+            cloud: recRows.map(rowToRecurring),
+            timestamp: (r) => toTime(r.updatedAt || r.createdAt),
+            combine: (localItem, cloudItem) => {
+              // Une overrides e exclusões mensais locais e da nuvem
+              const combinedOverrides = {
+                ...(localItem.monthlyOverrides || {}),
+                ...(cloudItem.monthlyOverrides || {}),
+              };
+              const combinedExclusions = Array.from(
+                new Set([...(localItem.excludedMonths || []), ...(cloudItem.excludedMonths || [])])
+              );
+              return {
+                ...cloudItem,
+                monthlyOverrides: Object.keys(combinedOverrides).length > 0 ? combinedOverrides : undefined,
+                excludedMonths: combinedExclusions.length > 0 ? combinedExclusions : undefined,
+              };
+            },
+          })
+        );
       }
 
-      // 3. REGISTROS MENSAIS DE RECORRENTES: Smart Merge e Purga
-      const localMonths = await RecurringMonthRepository.getAll();
-      const mergedMonthMap = new Map<string, RecurringMonthRecord>();
+      if (monthRows) {
+        const allRecurrings = await RecurringRepository.getAll();
+        await RecurringMonthRepository.mutate((local) => {
+          const merged = mergeById<RecurringMonthRecord>({
+            ...base,
+            table: 'recurring_month_records',
+            local,
+            cloud: monthRows.map(rowToMonthRecord),
+            timestamp: (m) => toTime(m.updatedAt || m.paidAt),
+            // Se a nuvem não tem valor válido, preserva o valor local
+            combine: (localItem, cloudItem) =>
+              cloudItem.amount <= 0 && localItem.amount > 0 ? { ...cloudItem, amount: localItem.amount } : cloudItem,
+          });
 
-      for (const localItem of localMonths) {
-        const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
-        if (allowedWorkspaceIds.includes(mappedWsId)) {
-          mergedMonthMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
-        }
+          // Aplica os valores mensais (overrides) gravados nas recorrências
+          const mergedById = new Map(merged.map((m) => [m.id, m]));
+          for (const rec of allRecurrings) {
+            if (!rec.monthlyOverrides) continue;
+            for (const [ym, overrideAmount] of Object.entries(rec.monthlyOverrides)) {
+              const [yStr, mStr] = ym.split('-');
+              const yearNum = parseInt(yStr, 10);
+              const monthNum = parseInt(mStr, 10);
+              const recMonthId = `${rec.id}-${yearNum}-${monthNum}`;
+              const existingRecord = mergedById.get(recMonthId);
+              mergedById.set(
+                recMonthId,
+                existingRecord
+                  ? { ...existingRecord, amount: overrideAmount }
+                  : {
+                      id: recMonthId,
+                      recurringId: rec.id,
+                      workspaceId: rec.workspaceId,
+                      month: monthNum,
+                      year: yearNum,
+                      amount: overrideAmount,
+                      isPaid: false,
+                    }
+              );
+            }
+          }
+          return Array.from(mergedById.values());
+        });
       }
 
-      if (Array.isArray(recMonthRes.data)) {
-        for (const row of recMonthRes.data) {
-          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
-
-          let monthNum = row.month;
-          let yearNum = row.year;
-          if ((!monthNum || !yearNum) && row.year_month) {
-            const parts = row.year_month.split('-');
-            yearNum = parseInt(parts[0], 10);
-            monthNum = parseInt(parts[1], 10);
-          }
-
-          const parsedAmount = (row.amount !== undefined && row.amount !== null && !isNaN(parseFloat(row.amount)))
-            ? parseFloat(row.amount)
-            : 0;
-
-          const cloudItem: RecurringMonthRecord = {
-            id: row.id,
-            recurringId: row.recurring_id,
-            workspaceId: row.workspace_id,
-            month: monthNum || 1,
-            year: yearNum || new Date().getFullYear(),
-            amount: parsedAmount,
-            isPaid: !!row.is_paid,
-            paidAt: row.paid_at,
-            transactionId: row.transaction_id,
-            updatedAt: row.updated_at,
-          };
-
-          const localItem = mergedMonthMap.get(cloudItem.id);
-          if (!localItem) {
-            mergedMonthMap.set(cloudItem.id, cloudItem);
-          } else {
-            // Se a nuvem não tem amount válido, preserva o amount que estava no registro local
-            if (cloudItem.amount <= 0 && localItem.amount > 0) {
-              cloudItem.amount = localItem.amount;
-            }
-            const localTimestamp = new Date(localItem.updatedAt || localItem.paidAt || 0).getTime();
-            const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.paidAt || 0).getTime();
-            if (cloudTimestamp >= localTimestamp) {
-              mergedMonthMap.set(cloudItem.id, cloudItem);
-            }
-          }
-        }
+      if (budgetRows) {
+        await BudgetRepository.mutate((local) =>
+          mergeById<Budget>({
+            ...base,
+            table: 'budgets',
+            local,
+            cloud: budgetRows.map(rowToBudget),
+            timestamp: (b) => toTime(b.updatedAt),
+          })
+        );
       }
 
-      // Injeta os monthlyOverrides de todas as recorrências salvas na nuvem
-      const allActiveRecs = await RecurringRepository.getAll();
-      for (const rec of allActiveRecs) {
-        if (rec.monthlyOverrides) {
-          for (const [ym, overrideAmount] of Object.entries(rec.monthlyOverrides)) {
-            const [yStr, mStr] = ym.split('-');
-            const yearNum = parseInt(yStr, 10);
-            const monthNum = parseInt(mStr, 10);
-            const recMonthId = `${rec.id}-${yearNum}-${monthNum}`;
-            const existingRecord = mergedMonthMap.get(recMonthId);
-            if (existingRecord) {
-              mergedMonthMap.set(recMonthId, {
-                ...existingRecord,
-                amount: overrideAmount,
-              });
-            } else {
-              mergedMonthMap.set(recMonthId, {
-                id: recMonthId,
-                recurringId: rec.id,
-                workspaceId: rec.workspaceId,
-                month: monthNum,
-                year: yearNum,
-                amount: overrideAmount,
-                isPaid: false,
-              });
-            }
-          }
-        }
-      }
-
-      await RecurringMonthRepository.saveAll(Array.from(mergedMonthMap.values()));
-
-      // 4. ORÇAMENTOS: Smart Merge e Purga
-      if (Array.isArray(bdgRes.data)) {
-        const localBudgets = await BudgetRepository.getAll();
-        const mergedMap = new Map<string, Budget>();
-
-        for (const localItem of localBudgets) {
-          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
-          if (allowedWorkspaceIds.includes(mappedWsId)) {
-            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
-          }
-        }
-
-        for (const row of bdgRes.data) {
-          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
-
-          const cloudItem: Budget = {
-            id: row.id,
-            workspaceId: row.workspace_id,
-            category: row.category,
-            limitAmount: parseFloat(row.limit_amount),
-            month: row.month,
-            year: row.year,
-            startDate: row.start_date,
-            endDate: row.end_date,
-            updatedAt: row.updated_at,
-          };
-
-          const localItem = mergedMap.get(cloudItem.id);
-          if (!localItem) {
-            mergedMap.set(cloudItem.id, cloudItem);
-          } else {
-            const localTimestamp = new Date(localItem.updatedAt || 0).getTime();
-            const cloudTimestamp = new Date(cloudItem.updatedAt || 0).getTime();
-            if (cloudTimestamp >= localTimestamp) {
-              mergedMap.set(cloudItem.id, cloudItem);
-            }
-          }
-        }
-
-        await BudgetRepository.saveAll(Array.from(mergedMap.values()));
-      }
-
-      // 5. METAS: Smart Merge e Purga
-      if (Array.isArray(goalRes.data)) {
-        const localGoals = await GoalRepository.getAll();
-        const mergedMap = new Map<string, Goal>();
-
-        for (const localItem of localGoals) {
-          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
-          if (allowedWorkspaceIds.includes(mappedWsId)) {
-            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
-          }
-        }
-
-        for (const row of goalRes.data) {
-          if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
-
-          const cloudItem: Goal = {
-            id: row.id,
-            workspaceId: row.workspace_id,
-            title: row.title,
-            targetAmount: parseFloat(row.target_amount),
-            currentAmount: parseFloat(row.current_amount),
-            deadlineDate: row.deadline_date,
-            icon: row.icon,
-            color: row.color,
-            notes: row.notes,
-            createdAt: row.created_at,
-            updatedAt: row.updated_at || row.created_at,
-          };
-
-          const localItem = mergedMap.get(cloudItem.id);
-          if (!localItem) {
-            mergedMap.set(cloudItem.id, cloudItem);
-          } else {
-            const localTimestamp = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
-            const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.createdAt || 0).getTime();
-            if (cloudTimestamp >= localTimestamp) {
-              mergedMap.set(cloudItem.id, cloudItem);
-            }
-          }
-        }
-
-        await GoalRepository.saveAll(Array.from(mergedMap.values()));
+      if (goalRows) {
+        await GoalRepository.mutate((local) =>
+          mergeById<Goal>({
+            ...base,
+            table: 'goals',
+            local,
+            cloud: goalRows.map(rowToGoal),
+            timestamp: (g) => toTime(g.updatedAt || g.createdAt),
+          })
+        );
       }
 
       return {

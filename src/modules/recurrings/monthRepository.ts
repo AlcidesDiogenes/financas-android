@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RecurringMonthRecord } from './types';
+import { withStorageLock } from '../../core/storageLock';
 
 const RECURRING_MONTH_STORAGE_KEY = '@financas:recurring_month_records_v1';
 
@@ -18,30 +19,35 @@ export class RecurringMonthRepository {
     await AsyncStorage.setItem(RECURRING_MONTH_STORAGE_KEY, JSON.stringify(records));
   }
 
+  // Ler -> alterar -> gravar sob trava (evita sobrescrita concorrente com a sincronização)
+  static mutate(fn: (all: RecurringMonthRecord[]) => RecurringMonthRecord[]): Promise<RecurringMonthRecord[]> {
+    return withStorageLock(RECURRING_MONTH_STORAGE_KEY, async () => {
+      const updated = fn(await this.getAll());
+      await this.saveAll(updated);
+      return updated;
+    });
+  }
+
   static async upsert(record: RecurringMonthRecord): Promise<RecurringMonthRecord[]> {
     const item: RecurringMonthRecord = {
       ...record,
       updatedAt: record.updatedAt || new Date().toISOString(),
     };
-    const all = await this.getAll();
-    const existingIndex = all.findIndex((r) => r.id === item.id);
-    let updated: RecurringMonthRecord[];
-
-    if (existingIndex >= 0) {
-      updated = [...all];
+    return this.mutate((all) => {
+      const existingIndex = all.findIndex((r) => r.id === item.id);
+      if (existingIndex < 0) return [item, ...all];
+      const updated = [...all];
       updated[existingIndex] = { ...updated[existingIndex], ...item, updatedAt: new Date().toISOString() };
-    } else {
-      updated = [item, ...all];
-    }
+      return updated;
+    });
+  }
 
-    await this.saveAll(updated);
-    return updated;
+  static async deleteByIds(ids: string[]): Promise<RecurringMonthRecord[]> {
+    const idSet = new Set(ids);
+    return this.mutate((all) => all.filter((r) => !idSet.has(r.id)));
   }
 
   static async deleteByRecurringId(recurringId: string): Promise<RecurringMonthRecord[]> {
-    const all = await this.getAll();
-    const updated = all.filter((r) => r.recurringId !== recurringId);
-    await this.saveAll(updated);
-    return updated;
+    return this.mutate((all) => all.filter((r) => r.recurringId !== recurringId));
   }
 }
