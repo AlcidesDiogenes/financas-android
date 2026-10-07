@@ -21,7 +21,6 @@ export interface RecurringDebit {
   endDate?: string;   // YYYY-MM (ex: '2026-12')
   updatedAt?: string;
   paidAt?: string;    // Data em que foi pago na competência
-  orderIndex?: number; // Ordem personalizada de exibição
   isPaused?: boolean;  // Pausado temporariamente
   monthlyOverrides?: Record<string, number>; // Overrides de valor por competência (ex: { '2026-10': 150 })
   excludedMonths?: string[]; // Competências excluídas da recorrência (ex: ['2026-10'])

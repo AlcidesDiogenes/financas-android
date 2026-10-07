@@ -13,6 +13,8 @@ export interface SyncQueueEntry {
   id: string;
   op: SyncOperation;
   queuedAt: string;
+  // Tentativas recusadas por o espaço ainda não existir na nuvem (chave estrangeira)
+  attempts?: number;
 }
 
 const SYNC_QUEUE_STORAGE_KEY = '@financas:sync_outbox_v1';
@@ -60,6 +62,19 @@ export class SyncQueue {
     const sentKeys = new Set(sent.map((e) => `${syncQueueKey(e.table, e.id)}|${e.op}|${e.queuedAt}`));
     await this.mutate((all) =>
       all.filter((e) => !sentKeys.has(`${syncQueueKey(e.table, e.id)}|${e.op}|${e.queuedAt}`))
+    );
+  }
+
+  // Conta mais uma tentativa recusada; a entrada só é afetada se não foi substituída durante o envio
+  static async incrementAttempts(failed: SyncQueueEntry[]): Promise<void> {
+    if (failed.length === 0) return;
+    const failedKeys = new Set(failed.map((e) => `${syncQueueKey(e.table, e.id)}|${e.op}|${e.queuedAt}`));
+    await this.mutate((all) =>
+      all.map((e) =>
+        failedKeys.has(`${syncQueueKey(e.table, e.id)}|${e.op}|${e.queuedAt}`)
+          ? { ...e, attempts: (e.attempts || 0) + 1 }
+          : e
+      )
     );
   }
 

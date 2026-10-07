@@ -1,9 +1,12 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { Workspace } from './types';
 
 const WORKSPACES_STORAGE_KEY = '@financas:workspaces_v1';
 const ACTIVE_WORKSPACE_KEY = '@financas:active_workspace_id_v1';
 const DEFAULT_WORKSPACE_KEY = '@financas:default_workspace_id_v1';
+// Espaços criados sem internet (ou cujo registro na nuvem falhou), reenviados no próximo carregamento
+const PENDING_CLOUD_WORKSPACES_KEY = '@financas:pending_cloud_workspaces_v1';
 
 export const getPersonalWorkspaceId = (userId?: string): string => {
   return userId ? `ws-${userId}` : 'ws-solo';
@@ -25,7 +28,7 @@ export const generateWorkspaceInviteCode = (): string => {
 
 export const generateUniqueWorkspaceInviteCode = async (
   existingWorkspaces?: Workspace[],
-  client?: any
+  client?: SupabaseClient | null
 ): Promise<string> => {
   let attempts = 0;
   while (attempts < 10) {
@@ -136,5 +139,18 @@ export class WorkspaceRepository {
 
   static async setDefaultWorkspaceId(id: string): Promise<void> {
     await AsyncStorage.setItem(DEFAULT_WORKSPACE_KEY, id);
+  }
+
+  static async getPendingCloudWorkspaceIds(): Promise<string[]> {
+    try {
+      const data = await AsyncStorage.getItem(PENDING_CLOUD_WORKSPACES_KEY);
+      return data ? JSON.parse(data) : [];
+    } catch {
+      return [];
+    }
+  }
+
+  static async setPendingCloudWorkspaceIds(ids: string[]): Promise<void> {
+    await AsyncStorage.setItem(PENDING_CLOUD_WORKSPACES_KEY, JSON.stringify(Array.from(new Set(ids))));
   }
 }

@@ -70,7 +70,7 @@ export function decodeRecurringNotes(rawNotes?: string | null): {
 // Linhas vindas do Supabase não são tipadas (cliente sem tipos gerados do banco)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type CloudRow = any;
-type PushResult = 'ok' | 'transient' | 'permanent';
+type PushResult = 'ok' | 'transient' | 'permanent' | 'missing_parent';
 
 interface RowContext {
   personalWsId: string;
@@ -86,8 +86,14 @@ interface PendingSets {
 // não adianta tentar de novo; a versão da nuvem prevalece na próxima sincronização.
 const PERMANENT_ERROR_CODE = /^(42501|23\d{3}|22\d{3})$/;
 
+// Chave estrangeira: o espaço (ou a recorrente) pode ainda não ter chegado à nuvem,
+// por exemplo um espaço criado sem internet. Tenta de novo algumas vezes antes de desistir.
+const FOREIGN_KEY_VIOLATION = '23503';
+const MAX_MISSING_PARENT_ATTEMPTS = 5;
+
 const classifyError = (error: { code?: string } | null): PushResult => {
   if (!error) return 'ok';
+  if (error.code === FOREIGN_KEY_VIOLATION) return 'missing_parent';
   return error.code && PERMANENT_ERROR_CODE.test(error.code) ? 'permanent' : 'transient';
 };
 
@@ -339,18 +345,6 @@ export class CloudSyncService {
     }
   }
 
-  static async testConnection(): Promise<{ success: boolean; message: string }> {
-    try {
-      const client = await SupabaseService.getClient();
-      const { error } = await client.from('workspaces').select('id').limit(1);
-      if (error) {
-        return { success: false, message: `Erro ao conectar: ${error.message}` };
-      }
-      return { success: true, message: 'Conectado à nuvem com sucesso!' };
-    } catch (e: any) {
-      return { success: false, message: e?.message || 'Falha na conexão com a nuvem' };
-    }
-  }
 
   // ---------- Envio (fila de pendências) ----------
 
@@ -422,6 +416,7 @@ export class CloudSyncService {
         userEmail: auth.user.email || null,
       };
       const done: SyncQueueEntry[] = [];
+      const missingParent: SyncQueueEntry[] = [];
       const recurringsStillPending = new Set<string>();
 
       for (const table of UPSERT_ORDER) {
@@ -446,7 +441,11 @@ export class CloudSyncService {
 
         const results = await this.pushRows(auth.client, table, toSend.map((s) => s.row));
         toSend.forEach((s, idx) => {
-          if (results[idx] === 'transient') {
+          const result = results[idx];
+          if (result === 'missing_parent' && (s.entry.attempts || 0) + 1 >= MAX_MISSING_PARENT_ATTEMPTS) {
+            done.push(s.entry); // desiste: o espaço não existe mesmo na nuvem
+          } else if (result === 'transient' || result === 'missing_parent') {
+            if (result === 'missing_parent') missingParent.push(s.entry);
             if (table === 'recurrings') recurringsStillPending.add(s.entry.id);
           } else {
             done.push(s.entry);
@@ -458,12 +457,14 @@ export class CloudSyncService {
         for (const entry of entries.filter((e) => e.table === table && e.op === 'delete')) {
           try {
             const { error } = await auth.client.from(table).delete().eq('id', entry.id);
-            if (classifyError(error) !== 'transient') done.push(entry);
+            const result = classifyError(error);
+            if (result !== 'transient' && result !== 'missing_parent') done.push(entry);
           } catch {}
         }
       }
 
       await SyncQueue.removeSent(done);
+      await SyncQueue.incrementAttempts(missingParent);
       return SyncQueue.count();
     });
   }
@@ -651,22 +652,10 @@ export class CloudSyncService {
             table: 'recurrings',
             local,
             cloud: recRows.map(rowToRecurring),
+            // Sem união de overrides/exclusões: a versão da nuvem vale por inteiro, para que um
+            // valor mensal removido em outro aparelho não volte. Alterações locais ainda não
+            // enviadas ficam protegidas pela fila de pendências.
             timestamp: (r) => toTime(r.updatedAt || r.createdAt),
-            combine: (localItem, cloudItem) => {
-              // Une overrides e exclusões mensais locais e da nuvem
-              const combinedOverrides = {
-                ...(localItem.monthlyOverrides || {}),
-                ...(cloudItem.monthlyOverrides || {}),
-              };
-              const combinedExclusions = Array.from(
-                new Set([...(localItem.excludedMonths || []), ...(cloudItem.excludedMonths || [])])
-              );
-              return {
-                ...cloudItem,
-                monthlyOverrides: Object.keys(combinedOverrides).length > 0 ? combinedOverrides : undefined,
-                excludedMonths: combinedExclusions.length > 0 ? combinedExclusions : undefined,
-              };
-            },
           })
         );
       }

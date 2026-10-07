@@ -10,6 +10,7 @@ import {
   generateUniqueWorkspaceInviteCode,
 } from './repository';
 import { useAuth } from '../../services/auth/AuthContext';
+import { SupabaseClient } from '@supabase/supabase-js';
 import { SupabaseService } from '../../services/supabase/supabaseClient';
 import { TransactionRepository } from '../transactions/repository';
 import { RecurringRepository } from '../recurrings/repository';
@@ -81,6 +82,43 @@ const migrateLocalSoloData = async (personalWsId: string) => {
       ));
     }
   } catch {}
+};
+
+// Registra o espaço e o membro dono na nuvem, em sequência (o membro depende do espaço
+// existir: chave estrangeira e RLS). Devolve false se não foi possível registrar.
+const registerWorkspaceInCloud = async (
+  ws: Workspace,
+  ownerEmail: string,
+  ownerName: string
+): Promise<boolean> => {
+  try {
+    const client = await SupabaseService.getClient();
+    const { error: wsError } = await client.from('workspaces').upsert(
+      {
+        id: ws.id,
+        name: ws.name,
+        description: ws.description,
+        type: ws.type,
+        invite_code: ws.inviteCode,
+        created_at: ws.createdAt,
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
+    if (wsError) return false;
+    const { error: memberError } = await client.from('workspace_members').upsert(
+      {
+        id: `mem-${ws.id}-owner`,
+        workspace_id: ws.id,
+        email: ownerEmail.toLowerCase().trim(),
+        name: ownerName,
+        role: 'owner',
+      },
+      { onConflict: 'id', ignoreDuplicates: true }
+    );
+    return !memberError;
+  } catch {
+    return false;
+  }
 };
 
 const WorkspaceContext = createContext<WorkspaceContextType | undefined>(undefined);
@@ -162,6 +200,20 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         role: 'owner',
       });
     } catch {}
+
+    // Reenvia espaços cuja criação na nuvem falhou (ex.: criados sem internet)
+    const pendingCloudIds = await WorkspaceRepository.getPendingCloudWorkspaceIds();
+    if (pendingCloudIds.length > 0) {
+      const stillPending: string[] = [];
+      for (const wsId of pendingCloudIds) {
+        const ws = list.find((w) => w.id === wsId);
+        if (!ws) continue; // excluído localmente: nada a enviar
+        if (!(await registerWorkspaceInCloud(ws, user.email, user.name || 'Você'))) {
+          stillPending.push(wsId);
+        }
+      }
+      await WorkspaceRepository.setPendingCloudWorkspaceIds(stillPending);
+    }
 
     // 2. Busca convites e espaços no Supabase
     if (user?.email) {
@@ -317,7 +369,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ownerName = user?.name || 'Você';
 
     const currentList = await WorkspaceRepository.getWorkspaces();
-    let supabaseClient: any = null;
+    let supabaseClient: SupabaseClient | null = null;
     try {
       supabaseClient = await SupabaseService.getClient();
     } catch {}
@@ -350,28 +402,11 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await WorkspaceRepository.saveWorkspaces(updated);
     await setActiveWorkspace(newWs.id);
 
-    // Salva na nuvem no Supabase
-    // Sequencial: o membro dono depende do espaço já existir (chave estrangeira e RLS)
-    try {
-      const client = await SupabaseService.getClient();
-      const { error: wsError } = await client.from('workspaces').upsert({
-        id: newWs.id,
-        name: newWs.name,
-        description: newWs.description,
-        type: newWs.type,
-        invite_code: newWs.inviteCode,
-        created_at: newWs.createdAt,
-      });
-      if (!wsError) {
-        await client.from('workspace_members').upsert({
-          id: `mem-${newWs.id}-owner`,
-          workspace_id: newWs.id,
-          email: ownerEmail.toLowerCase().trim(),
-          name: ownerName,
-          role: 'owner',
-        });
-      }
-    } catch {}
+    // Salva na nuvem no Supabase; se falhar (ex.: sem internet), fica pendente para o próximo carregamento
+    if (!(await registerWorkspaceInCloud(newWs, ownerEmail, ownerName))) {
+      const pendingIds = await WorkspaceRepository.getPendingCloudWorkspaceIds();
+      await WorkspaceRepository.setPendingCloudWorkspaceIds([...pendingIds, newWs.id]);
+    }
   };
 
   const addMember = async (
@@ -709,7 +744,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       return { success: false, message: 'Espaços privados não possuem código de convite.' };
     }
 
-    let supabaseClient: any = null;
+    let supabaseClient: SupabaseClient | null = null;
     try {
       supabaseClient = await SupabaseService.getClient();
     } catch {}

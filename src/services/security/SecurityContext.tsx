@@ -1,5 +1,5 @@
-import React, { createContext, useContext, useEffect, useState } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
+import React, { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { AppState, View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { BiometricsService } from './BiometricsService';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../core/theme/ThemeContext';
@@ -14,37 +14,83 @@ interface SecurityContextType {
 
 const SecurityContext = createContext<SecurityContextType | undefined>(undefined);
 
+// Tempo em segundo plano a partir do qual o app volta a pedir a biometria.
+// O próprio diálogo de biometria e o compartilhamento de arquivos mandam o app para o
+// segundo plano por instantes; o limite evita um ciclo de bloqueios.
+const RELOCK_AFTER_BACKGROUND_MS = 30 * 1000;
+
 export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { theme } = useTheme();
   const [isBiometricsEnabled, setIsBiometricsEnabled] = useState(false);
   const [isHardwareSupported, setIsHardwareSupported] = useState(false);
   const [isLocked, setIsLocked] = useState(false);
+  // Enquanto verifica a preferência de biometria, não mostra os dados (evita o "flash" antes do bloqueio)
+  const [isChecking, setIsChecking] = useState(true);
+  const isBiometricsEnabledRef = useRef(false);
+  const isAuthenticatingRef = useRef(false);
+  const backgroundAtRef = useRef<number | null>(null);
 
   useEffect(() => {
     checkSupportAndLock();
   }, []);
 
-  const checkSupportAndLock = async () => {
-    const supported = await BiometricsService.isHardwareSupported();
-    setIsHardwareSupported(supported);
-    if (supported) {
-      const enabled = await BiometricsService.isBiometricsEnabled();
-      setIsBiometricsEnabled(enabled);
-      if (enabled) {
+  useEffect(() => {
+    isBiometricsEnabledRef.current = isBiometricsEnabled;
+  }, [isBiometricsEnabled]);
+
+  // Volta a bloquear quando o app retorna depois de um tempo em segundo plano
+  useEffect(() => {
+    const subscription = AppState.addEventListener('change', (nextState) => {
+      if (nextState === 'background') {
+        if (!isAuthenticatingRef.current) backgroundAtRef.current = Date.now();
+        return;
+      }
+      if (nextState !== 'active') return;
+
+      const backgroundAt = backgroundAtRef.current;
+      backgroundAtRef.current = null;
+      if (
+        isBiometricsEnabledRef.current &&
+        backgroundAt !== null &&
+        Date.now() - backgroundAt >= RELOCK_AFTER_BACKGROUND_MS
+      ) {
         setIsLocked(true);
-        // Prompt unlock immediately
-        const success = await BiometricsService.authenticate();
-        if (success) {
-          setIsLocked(false);
+        unlockApp();
+      }
+    });
+    return () => subscription.remove();
+  }, []);
+
+  const checkSupportAndLock = async () => {
+    try {
+      const supported = await BiometricsService.isHardwareSupported();
+      setIsHardwareSupported(supported);
+      if (supported) {
+        const enabled = await BiometricsService.isBiometricsEnabled();
+        setIsBiometricsEnabled(enabled);
+        isBiometricsEnabledRef.current = enabled;
+        if (enabled) {
+          setIsLocked(true);
+          setIsChecking(false);
+          // Prompt unlock immediately
+          await unlockApp();
         }
       }
+    } finally {
+      setIsChecking(false);
     }
   };
 
   const unlockApp = async () => {
-    const success = await BiometricsService.authenticate();
-    if (success) {
-      setIsLocked(false);
+    if (isAuthenticatingRef.current) return;
+    isAuthenticatingRef.current = true;
+    try {
+      const success = await BiometricsService.authenticate();
+      if (success) {
+        setIsLocked(false);
+      }
+    } finally {
+      isAuthenticatingRef.current = false;
     }
   };
 
@@ -71,7 +117,9 @@ export const SecurityProvider: React.FC<{ children: React.ReactNode }> = ({ chil
         unlockApp,
       }}
     >
-      {isLocked ? (
+      {isChecking ? (
+        <View style={[styles.lockScreen, { backgroundColor: theme.background }]} />
+      ) : isLocked ? (
         <View style={[styles.lockScreen, { backgroundColor: theme.background }]}>
           <View style={[styles.lockIconCircle, { backgroundColor: theme.surfaceVariant }]}>
             <Ionicons name="finger-print" size={64} color={theme.primary} />

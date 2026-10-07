@@ -13,7 +13,6 @@ import { BudgetRepository } from './budgets/repository';
 import { Goal, GoalProgress } from './goals/types';
 import { GoalRepository } from './goals/repository';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
-import { SupabaseService } from '../services/supabase/supabaseClient';
 import { getCurrentMonthYear } from '../core/utils/date';
 
 export type BalanceMode = 'realized' | 'projected';
@@ -52,7 +51,6 @@ interface FinanceContextType {
   ) => Promise<void>;
   toggleRecurringPaid: (id: string) => Promise<void>;
   batchSetRecurringsPaid: (ids: string[], isPaid: boolean) => Promise<void>;
-  reorderRecurrings: (reordered: RecurringDebit[]) => Promise<void>;
   deleteRecurring: (id: string, scope?: DeleteRecurringScope) => Promise<void>;
   saveBudget: (
     category: Budget['category'],
@@ -68,7 +66,6 @@ interface FinanceContextType {
   withdrawGoal: (id: string, amount: number, createTransaction?: boolean) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
   reloadAll: () => Promise<void>;
-  wipeAllData: () => Promise<void>;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
@@ -151,11 +148,26 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   // Ao voltar do segundo plano: envia pendências da fila e baixa novidades da nuvem
   const reloadAllRef = useRef(reloadAll);
   reloadAllRef.current = reloadAll;
+  const selectedPeriodRef = useRef({ month: selectedMonth, year: selectedYear });
+  selectedPeriodRef.current = { month: selectedMonth, year: selectedYear };
+  const lastCurrentPeriodRef = useRef({ month: currentPeriod.month, year: currentPeriod.year });
   useEffect(() => {
     const subscription = AppState.addEventListener('change', (nextState) => {
-      if (nextState === 'active') {
-        reloadAllRef.current();
+      if (nextState !== 'active') return;
+
+      // Virada do mês com o app aberto: quem estava vendo o mês "atual" passa para o novo mês
+      const now = getCurrentMonthYear();
+      const last = lastCurrentPeriodRef.current;
+      if (now.month !== last.month || now.year !== last.year) {
+        const selected = selectedPeriodRef.current;
+        if (selected.month === last.month && selected.year === last.year) {
+          setSelectedMonth(now.month);
+          setSelectedYear(now.year);
+        }
+        lastCurrentPeriodRef.current = { month: now.month, year: now.year };
       }
+
+      reloadAllRef.current();
     });
     return () => subscription.remove();
   }, []);
@@ -243,14 +255,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const pendingRecurringExpense = useMemo(() => {
     return recurrings
       .filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear))
-      .filter((r) => !r.isPaidCurrentMonth && (r.type === 'expense' || !r.type))
+      .filter((r) => !r.isPaused && !r.isPaidCurrentMonth && (r.type === 'expense' || !r.type))
       .reduce((sum, r) => sum + r.amount, 0);
   }, [recurrings, selectedMonth, selectedYear]);
 
   const pendingRecurringIncome = useMemo(() => {
     return recurrings
       .filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear))
-      .filter((r) => !r.isPaidCurrentMonth && r.type === 'income')
+      .filter((r) => !r.isPaused && !r.isPaidCurrentMonth && r.type === 'income')
       .reduce((sum, r) => sum + r.amount, 0);
   }, [recurrings, selectedMonth, selectedYear]);
 
@@ -623,24 +635,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     }
   };
 
-  const reorderRecurrings = async (reordered: RecurringDebit[]) => {
-    const updatedWithOrder = reordered.map((r, idx) => ({
-      ...r,
-      orderIndex: idx,
-    }));
-    const updatedAll = allRecurrings.map((r) => {
-      const match = updatedWithOrder.find((item) => item.id === r.id);
-      return match ? match : r;
-    });
-    setAllRecurrings(updatedAll);
-    await RecurringRepository.saveAll(updatedAll);
-    try {
-      const client = await SupabaseService.getClient();
-      for (const item of updatedWithOrder) {
-        await client.from('recurrings').update({ order_index: item.orderIndex }).eq('id', item.id);
-      }
-    } catch {}
-  };
 
   const deleteRecurring = async (id: string, scope: DeleteRecurringScope = 'all') => {
     const target = allRecurrings.find((r) => r.id === id);
@@ -851,29 +845,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await CloudSyncService.autoDeleteGoal(id);
   };
 
-  const wipeAllData = async () => {
-    await Promise.all([
-      TransactionRepository.saveAll([]),
-      RecurringRepository.saveAll([]),
-      BudgetRepository.saveAll([]),
-      GoalRepository.saveAll([]),
-    ]);
-    setAllTransactions([]);
-    setAllRecurrings([]);
-    setAllBudgets([]);
-    setAllGoals([]);
-
-    // Clear on Supabase cloud as well
-    try {
-      const client = await SupabaseService.getClient();
-      await Promise.all([
-        client.from('transactions').delete().neq('id', 'dummy_id_placeholder'),
-        client.from('recurrings').delete().neq('id', 'dummy_id_placeholder'),
-        client.from('budgets').delete().neq('id', 'dummy_id_placeholder'),
-        client.from('goals').delete().neq('id', 'dummy_id_placeholder'),
-      ]);
-    } catch {}
-  };
 
   return (
     <FinanceContext.Provider
@@ -902,7 +873,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         updateRecurringAmount,
         toggleRecurringPaid,
         batchSetRecurringsPaid,
-        reorderRecurrings,
         deleteRecurring,
         saveBudget,
         deleteBudget,
@@ -912,7 +882,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         withdrawGoal,
         deleteGoal,
         reloadAll,
-        wipeAllData,
       }}
     >
       {children}
