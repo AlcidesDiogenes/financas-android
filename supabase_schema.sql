@@ -100,7 +100,9 @@ CREATE TABLE IF NOT EXISTS public.goals (
 
 -- ==============================================================================
 -- POLÍTICAS DE ACESSO (RLS - ROW LEVEL SECURITY)
--- Permite que o app leia e salve dados utilizando a chave pública (publishable)
+-- Aqui o RLS é apenas ligado (sem políticas = nenhum acesso). As políticas por
+-- membro do espaço, as funções auxiliares e a função de exclusão de conta ficam em
+-- supabase_security_fix.sql, que deve ser executado logo após este arquivo.
 -- ==============================================================================
 ALTER TABLE public.workspaces ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.workspace_members ENABLE ROW LEVEL SECURITY;
@@ -110,21 +112,6 @@ ALTER TABLE public.recurring_month_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.budgets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.goals ENABLE ROW LEVEL SECURITY;
 
-DROP POLICY IF EXISTS "Permitir workspaces" ON public.workspaces;
-DROP POLICY IF EXISTS "Permitir workspace_members" ON public.workspace_members;
-DROP POLICY IF EXISTS "Permitir transactions" ON public.transactions;
-DROP POLICY IF EXISTS "Permitir recurrings" ON public.recurrings;
-DROP POLICY IF EXISTS "Permitir recurring_month_records" ON public.recurring_month_records;
-DROP POLICY IF EXISTS "Permitir budgets" ON public.budgets;
-DROP POLICY IF EXISTS "Permitir goals" ON public.goals;
-
-CREATE POLICY "Permitir workspaces" ON public.workspaces FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir workspace_members" ON public.workspace_members FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir transactions" ON public.transactions FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir recurrings" ON public.recurrings FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir recurring_month_records" ON public.recurring_month_records FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir budgets" ON public.budgets FOR ALL USING (true) WITH CHECK (true);
-CREATE POLICY "Permitir goals" ON public.goals FOR ALL USING (true) WITH CHECK (true);
 
 -- ==============================================================================
 -- HABILITAR TEMPO REAL (REALTIME REPLICATION)
@@ -137,49 +124,6 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.recurrings;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.recurring_month_records;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.budgets;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.goals;
-
--- ==============================================================================
--- FUNÇÃO RPC: EXCLUSÃO DEFINITIVA DE CONTA (LGPD / PRIVACIDADE)
--- Permite que o próprio usuário autenticado exclua sua conta em auth.users e todos os dados
--- ==============================================================================
-CREATE OR REPLACE FUNCTION public.delete_user_account()
-RETURNS void
-LANGUAGE plpgsql
-SECURITY DEFINER
-AS $$
-DECLARE
-    current_uid UUID;
-    user_email_val TEXT;
-BEGIN
-    current_uid := auth.uid();
-    IF current_uid IS NULL THEN
-        RAISE EXCEPTION 'Não autenticado';
-    END IF;
-
-    -- Obter e-mail do usuário
-    SELECT email INTO user_email_val FROM auth.users WHERE id = current_uid;
-
-    -- 1. Excluir dados do workspace solo deste usuário (ws-<uid> e ws-solo)
-    DELETE FROM public.transactions WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
-    DELETE FROM public.recurrings WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
-    DELETE FROM public.recurring_month_records WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
-    DELETE FROM public.budgets WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
-    DELETE FROM public.goals WHERE workspace_id IN ('ws-' || current_uid::text, 'ws-solo');
-    DELETE FROM public.workspaces WHERE id IN ('ws-' || current_uid::text, 'ws-solo');
-
-    -- 2. Remover associações de membros em workspaces compartilhados
-    IF user_email_val IS NOT NULL THEN
-        DELETE FROM public.workspace_members WHERE LOWER(email) = LOWER(user_email_val);
-    END IF;
-
-    -- 2.1 Excluir workspaces que ficaram sem nenhum membro restante
-    DELETE FROM public.workspaces 
-    WHERE id NOT IN (SELECT DISTINCT workspace_id FROM public.workspace_members);
-
-    -- 3. Excluir o usuário definitivamente da tabela auth.users do Supabase
-    DELETE FROM auth.users WHERE id = current_uid;
-END;
-$$;
 
 -- ==============================================================================
 -- 6. ATUALIZAÇÕES DEFENSIVAS DE COLUNAS E ÍNDICES DE ALTA PERFORMANCE

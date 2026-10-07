@@ -40,13 +40,12 @@ export const generateUniqueWorkspaceInviteCode = async (
     // 2. Verifica ativamente no Supabase na nuvem se algum espaço no mundo já possui este código
     if (client) {
       try {
-        const { data } = await client
-          .from('workspaces')
-          .select('id')
-          .eq('invite_code', candidate)
-          .maybeSingle();
+        // Via RPC: com RLS, o select direto não enxerga espaços de outros usuários
+        const { data } = await client.rpc('find_workspace_by_invite_code', {
+          p_code: candidate,
+        });
 
-        if (data && data.id) {
+        if (Array.isArray(data) && data.length > 0) {
           // Colisão detectada! Descarta e repete o sorteio imediatamente.
           continue;
         }

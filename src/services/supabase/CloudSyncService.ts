@@ -344,8 +344,20 @@ export class CloudSyncService {
       ]);
 
       if (workspaces.length > 0) {
+        // Só o dono pode alterar o espaço na nuvem (RLS); enviar espaços de terceiros
+        // faria o lote inteiro ser recusado.
+        const userEmail = (user.email || '').toLowerCase().trim();
         const validWorkspaces = workspaces
           .filter((w) => w.id !== 'ws-solo')
+          .filter(
+            (w) =>
+              w.type === 'solo' ||
+              w.members.some(
+                (m) =>
+                  m.role === 'owner' &&
+                  (m.isCurrentUser || (!!userEmail && m.email.toLowerCase().trim() === userEmail))
+              )
+          )
           .map((w) => ({
             id: w.type === 'solo' ? personalWsId : w.id,
             name: w.name,

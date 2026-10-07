@@ -407,35 +407,24 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const deleteAccount = async (): Promise<{ success: boolean; error?: string }> => {
     try {
-      const client = await SupabaseService.getClient();
-
-      // 1. Apaga também explicitamente todos os registros do workspace pessoal no Supabase
-      try {
-        const personalWsId = user?.id ? `ws-${user.id}` : 'ws-solo';
-        await Promise.all([
-          client.from('transactions').delete().eq('workspace_id', personalWsId),
-          client.from('recurrings').delete().eq('workspace_id', personalWsId),
-          client.from('recurring_month_records').delete().eq('workspace_id', personalWsId),
-          client.from('budgets').delete().eq('workspace_id', personalWsId),
-          client.from('goals').delete().eq('workspace_id', personalWsId),
-          client.from('workspaces').delete().eq('id', personalWsId),
-        ]);
-      } catch {}
-
-      // 2. Chama a função segura no Supabase para deletar o usuário do auth.users e suas tabelas
-      try {
-        await client.rpc('delete_user_account');
-      } catch (rpcErr) {
-        // Fallback caso a procedure RPC ainda não tenha sido criada
-        if (user?.email) {
-          await client.from('workspace_members').delete().eq('email', user.email.toLowerCase().trim());
+      // 1. Conta na nuvem: a função segura no Supabase apaga o espaço pessoal, trata os
+      // espaços compartilhados e remove o usuário de auth.users. Se falhar, nada local é
+      // apagado, para o usuário não acreditar que a conta foi excluída.
+      if (user) {
+        const client = await SupabaseService.getClient();
+        const { error: rpcError } = await client.rpc('delete_user_account');
+        if (rpcError) {
+          return {
+            success: false,
+            error: 'Não foi possível excluir sua conta na nuvem. Verifique sua conexão e tente novamente.',
+          };
         }
-      }
 
-      // 2. Logout no Supabase
-      try {
-        await client.auth.signOut();
-      } catch {}
+        // 2. Logout no Supabase
+        try {
+          await client.auth.signOut();
+        } catch {}
+      }
 
       // 3. Limpar todos os dados locais do aplicativo
       await AsyncStorage.clear();

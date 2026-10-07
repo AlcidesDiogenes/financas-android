@@ -356,25 +356,26 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     await setActiveWorkspace(newWs.id);
 
     // Salva na nuvem no Supabase
+    // Sequencial: o membro dono depende do espaço já existir (chave estrangeira e RLS)
     try {
       const client = await SupabaseService.getClient();
-      await Promise.all([
-        client.from('workspaces').upsert({
-          id: newWs.id,
-          name: newWs.name,
-          description: newWs.description,
-          type: newWs.type,
-          invite_code: newWs.inviteCode,
-          created_at: newWs.createdAt,
-        }),
-        client.from('workspace_members').upsert({
+      const { error: wsError } = await client.from('workspaces').upsert({
+        id: newWs.id,
+        name: newWs.name,
+        description: newWs.description,
+        type: newWs.type,
+        invite_code: newWs.inviteCode,
+        created_at: newWs.createdAt,
+      });
+      if (!wsError) {
+        await client.from('workspace_members').upsert({
           id: `mem-${newWs.id}-owner`,
           workspace_id: newWs.id,
           email: ownerEmail.toLowerCase().trim(),
           name: ownerName,
           role: 'owner',
-        }),
-      ]);
+        });
+      }
     } catch {}
   };
 
@@ -757,16 +758,19 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       }
 
       const uniqueCandidates = Array.from(new Set(candidateCodes));
-      let data: any = null;
+      let data: { id: string; name: string; type: string } | null = null;
 
+      // Quem ainda não é membro não enxerga a tabela workspaces (RLS);
+      // a função RPC devolve apenas id, nome e tipo do espaço do código.
       for (const candidate of uniqueCandidates) {
-        const { data: found } = await client
-          .from('workspaces')
-          .select('*')
-          .eq('invite_code', candidate)
-          .maybeSingle();
-        if (found) {
-          data = found;
+        const { data: found, error } = await client.rpc('find_workspace_by_invite_code', {
+          p_code: candidate,
+        });
+        if (error) {
+          return { success: false, message: 'Não foi possível verificar o código de convite. Tente novamente.' };
+        }
+        if (Array.isArray(found) && found.length > 0) {
+          data = found[0];
           break;
         }
       }
