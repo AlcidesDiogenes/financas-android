@@ -77,6 +77,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
   const [title, setTitle] = useState('');
   const [amountStr, setAmountStr] = useState('');
   const [category, setCategory] = useState<TransactionCategory>('Moradia');
+  const [dueDayStr, setDueDayStr] = useState('10');
   const [frequency, setFrequency] = useState<RecurringFrequency>('monthly');
   const [assignedTo, setAssignedTo] = useState<string>('');
   const [notes, setNotes] = useState('');
@@ -87,6 +88,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
   const [isPaused, setIsPaused] = useState(false);
   const [titleError, setTitleError] = useState('');
   const [amountError, setAmountError] = useState('');
+  const [dueDayError, setDueDayError] = useState('');
   const [vigenciaError, setVigenciaError] = useState('');
 
   useEffect(() => {
@@ -96,6 +98,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         setTitle(initialData.title);
         setAmountStr(initialData.amount ? initialData.amount.toString() : '');
         setCategory(initialData.category);
+        setDueDayStr(initialData.dueDay ? initialData.dueDay.toString() : '10');
         setFrequency(initialData.frequency || 'monthly');
         setAssignedTo(initialData.assignedTo || '');
         setNotes(initialData.notes || '');
@@ -127,6 +130,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         setTitle('');
         setAmountStr('');
         setCategory('Moradia');
+        setDueDayStr('10');
         setFrequency('monthly');
         setAssignedTo('');
         setNotes('');
@@ -136,6 +140,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       }
       setTitleError('');
       setAmountError('');
+      setDueDayError('');
       setVigenciaError('');
     }
   }, [visible, initialData, currentPeriod]);
@@ -156,6 +161,14 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       hasError = true;
     } else {
       setAmountError('');
+    }
+
+    const day = parseInt(dueDayStr, 10);
+    if (isNaN(day) || day < 1 || day > 31) {
+      setDueDayError('Dia entre 1 e 31');
+      hasError = true;
+    } else {
+      setDueDayError('');
     }
 
     let startDateFormatted: string | undefined = undefined;
@@ -197,7 +210,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       category,
       frequency,
       type,
-      dueDay: initialData?.dueDay || 1,
+      dueDay: day,
       reminderEnabled: true,
       assignedTo: assignedTo.trim() || undefined,
       notes: notes.trim() || undefined,
@@ -309,17 +322,35 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         error={titleError}
       />
 
-      <Input
-        label="Valor Mensal (R$)"
-        placeholder="0.00"
-        keyboardType="decimal-pad"
-        value={amountStr}
-        onChangeText={(val) => {
-          setAmountStr(val);
-          if (amountError) setAmountError('');
-        }}
-        error={amountError}
-      />
+      <View style={styles.row}>
+        <View style={{ flex: 1.5, marginRight: 12 }}>
+          <Input
+            label="Valor Mensal (R$)"
+            placeholder="0.00"
+            keyboardType="decimal-pad"
+            value={amountStr}
+            onChangeText={(val) => {
+              setAmountStr(val);
+              if (amountError) setAmountError('');
+            }}
+            error={amountError}
+          />
+        </View>
+        <View style={{ flex: 1 }}>
+          <Input
+            label={type === 'income' ? 'Dia do Pag.' : 'Dia de Venc.'}
+            placeholder="Ex: 10"
+            keyboardType="number-pad"
+            maxLength={2}
+            value={dueDayStr}
+            onChangeText={(val) => {
+              setDueDayStr(val);
+              if (dueDayError) setDueDayError('');
+            }}
+            error={dueDayError}
+          />
+        </View>
+      </View>
 
       {/* Vigência (Início e Fim) */}
       <View style={{ marginBottom: 14 }}>
