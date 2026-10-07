@@ -23,6 +23,7 @@ export interface RecurringDebit {
   paidAt?: string;    // Data em que foi pago na competência
   orderIndex?: number; // Ordem personalizada de exibição
   isPaused?: boolean;  // Pausado temporariamente
+  monthlyOverrides?: Record<string, number>; // Overrides de valor por competência (ex: { '2026-10': 150 })
 }
 
 export interface RecurringMonthRecord {

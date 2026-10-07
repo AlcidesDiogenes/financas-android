@@ -59,15 +59,12 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
   const isDraggingRef = useRef(false);
   const [isDragging, setIsDragging] = useState(false);
 
-  const urgencyInfo = useMemo(() => {
+  const itemStatus = useMemo(() => {
     if (recurring.isPaused) {
       return {
-        status: 'paused',
         label: 'Pausada',
         badgeLabel: 'Pausada',
         variant: 'neutral' as const,
-        icon: 'pause-circle',
-        color: '#6B7280',
       };
     }
 
@@ -82,116 +79,22 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         } catch {}
       }
       return {
-        status: 'paid',
         label: paidLabel,
         badgeLabel: paidLabel,
         variant: 'success' as const,
-        icon: 'checkmark-circle',
-        color: theme.success,
-      };
-    }
-
-    const now = new Date();
-    const curMonth = now.getMonth() + 1;
-    const curYear = now.getFullYear();
-    const curDay = now.getDate();
-
-    const month = selectedMonth || curMonth;
-    const year = selectedYear || curYear;
-
-    const isCurrentCompetence = month === curMonth && year === curYear;
-    const isPastCompetence = year < curYear || (year === curYear && month < curMonth);
-    const isFutureCompetence = year > curYear || (year === curYear && month > curMonth);
-
-    const defaultBadgeLabel = recurring.type === 'income' ? 'A Receber' : 'Pendente';
-
-    if (isPastCompetence) {
-      return {
-        status: 'overdue',
-        label: recurring.type === 'income' ? 'Não Recebido' : 'Em Atraso',
-        badgeLabel: recurring.type === 'income' ? 'Não Recebido' : 'Atrasada',
-        variant: 'danger' as const,
-        icon: 'alert-circle',
-        color: '#EF4444',
-      };
-    }
-
-    if (isFutureCompetence) {
-      return {
-        status: 'future',
-        label: `${recurring.type === 'income' ? 'Recebe' : 'Vence'} dia ${recurring.dueDay}`,
-        badgeLabel: defaultBadgeLabel,
-        variant: 'warning' as const,
-        icon: 'calendar',
-        color: theme.textMuted,
-      };
-    }
-
-    // Competência atual
-    if (curDay > recurring.dueDay) {
-      const diff = curDay - recurring.dueDay;
-      const text = diff === 1 ? 'Venceu ontem' : `Venceu há ${diff}d`;
-      return {
-        status: 'overdue',
-        label: recurring.type === 'income' ? 'Atrasado' : text,
-        badgeLabel: recurring.type === 'income' ? 'Atrasado' : 'Atrasada',
-        variant: 'danger' as const,
-        icon: 'warning',
-        color: '#EF4444',
-      };
-    }
-
-    if (curDay === recurring.dueDay) {
-      return {
-        status: 'today',
-        label: recurring.type === 'income' ? 'Recebe Hoje!' : 'Vence Hoje!',
-        badgeLabel: recurring.type === 'income' ? 'Recebe Hoje' : 'Vence Hoje',
-        variant: 'warning' as const,
-        icon: 'flash',
-        color: '#F59E0B',
-      };
-    }
-
-    const diffToDue = recurring.dueDay - curDay;
-    if (diffToDue === 1) {
-      return {
-        status: 'soon',
-        label: `${recurring.type === 'income' ? 'Recebe' : 'Vence'} amanhã`,
-        badgeLabel: 'Vence Amanhã',
-        variant: 'warning' as const,
-        icon: 'time',
-        color: '#F59E0B',
-      };
-    }
-
-    if (diffToDue <= 5) {
-      return {
-        status: 'soon',
-        label: `Vence em ${diffToDue} dias`,
-        badgeLabel: defaultBadgeLabel,
-        variant: 'warning' as const,
-        icon: 'time',
-        color: '#F59E0B',
       };
     }
 
     return {
-      status: 'upcoming',
-      label: `Vence dia ${recurring.dueDay}`,
-      badgeLabel: defaultBadgeLabel,
+      label: recurring.type === 'income' ? 'A Receber' : 'Pendente',
+      badgeLabel: recurring.type === 'income' ? 'A Receber' : 'Pendente',
       variant: 'warning' as const,
-      icon: 'calendar-outline',
-      color: theme.textMuted,
     };
   }, [
     recurring.isPaused,
     recurring.isPaidCurrentMonth,
     recurring.paidAt,
-    recurring.dueDay,
     recurring.type,
-    selectedMonth,
-    selectedYear,
-    theme,
   ]);
 
   const vigenciaLabel = useMemo(() => {
@@ -478,13 +381,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
                 <Ionicons name="pause" size={10} color="#6B7280" style={{ marginRight: 3 }} />
                 <Text style={[styles.urgencyTagText, { color: '#6B7280' }]}>Pausada</Text>
               </View>
-            ) : !recurring.isPaidCurrentMonth && (urgencyInfo.status === 'overdue' || urgencyInfo.status === 'today' || urgencyInfo.status === 'soon') ? (
-              <View style={[styles.urgencyTag, { backgroundColor: `${urgencyInfo.color}15`, borderColor: `${urgencyInfo.color}40` }]}>
-                <Ionicons name={urgencyInfo.icon as any} size={10} color={urgencyInfo.color} style={{ marginRight: 3 }} />
-                <Text style={[styles.urgencyTagText, { color: urgencyInfo.color }]}>
-                  {urgencyInfo.label}
-                </Text>
-              </View>
             ) : null}
           </View>
 
@@ -547,8 +443,8 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
               style={styles.badgeBtn}
             >
               <Badge
-                label={urgencyInfo.badgeLabel}
-                variant={urgencyInfo.variant}
+                label={itemStatus.badgeLabel}
+                variant={itemStatus.variant}
               />
             </TouchableOpacity>
 

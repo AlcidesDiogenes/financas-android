@@ -40,6 +40,7 @@ interface AddRecurringModalProps {
     startDate?: string;
     endDate?: string;
     isPaused?: boolean;
+    monthlyOverrides?: Record<string, number>;
   }) => void;
   onDelete?: (id: string) => void;
 }
@@ -217,6 +218,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       startDate: startDateFormatted,
       endDate: endDateFormatted,
       isPaused,
+      monthlyOverrides: initialData?.monthlyOverrides,
     });
 
     onClose();

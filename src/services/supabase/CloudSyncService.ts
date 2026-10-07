@@ -9,6 +9,27 @@ import { Transaction } from '../../modules/transactions/types';
 import { RecurringDebit, RecurringMonthRecord } from '../../modules/recurrings/types';
 import { Budget } from '../../modules/budgets/types';
 import { Goal } from '../../modules/goals/types';
+export function encodeRecurringNotes(userNotes?: string | null, monthlyOverrides?: Record<string, number>): string | null {
+  const cleanUserNotes = (userNotes || '').replace(/\s*<!--__MONTHLY_OVERRIDES__:[\s\S]*?-->/g, '').trim();
+  if (!monthlyOverrides || Object.keys(monthlyOverrides).length === 0) {
+    return cleanUserNotes || null;
+  }
+  const tag = `<!--__MONTHLY_OVERRIDES__:${JSON.stringify(monthlyOverrides)}-->`;
+  return cleanUserNotes ? `${cleanUserNotes}\n${tag}` : tag;
+}
+
+export function decodeRecurringNotes(rawNotes?: string | null): { userNotes?: string; monthlyOverrides?: Record<string, number> } {
+  if (!rawNotes) return { userNotes: undefined, monthlyOverrides: undefined };
+  const match = rawNotes.match(/<!--__MONTHLY_OVERRIDES__:([\s\S]*?)-->/);
+  let monthlyOverrides: Record<string, number> | undefined = undefined;
+  if (match && match[1]) {
+    try {
+      monthlyOverrides = JSON.parse(match[1]);
+    } catch {}
+  }
+  const userNotes = rawNotes.replace(/\s*<!--__MONTHLY_OVERRIDES__:[\s\S]*?-->/g, '').trim() || undefined;
+  return { userNotes, monthlyOverrides };
+}
 
 export class CloudSyncService {
   private static async getAuthenticatedClient() {
@@ -103,7 +124,7 @@ export class CloudSyncService {
         assigned_to: r.assignedTo || null,
         start_date: r.startDate || null,
         end_date: r.endDate || null,
-        notes: r.notes,
+        notes: encodeRecurringNotes(r.notes, r.monthlyOverrides),
       };
       await this.safeUpsert(auth.client, 'recurrings', { ...base, updated_at: r.updatedAt || new Date().toISOString() }, base);
     } catch {}
@@ -123,18 +144,47 @@ export class CloudSyncService {
       if (!auth) return;
       const personalWsId = `ws-${auth.user.id}`;
       const wsId = (!rec.workspaceId || rec.workspaceId === 'ws-solo') ? personalWsId : rec.workspaceId;
-      const base = {
+      const ym = `${rec.year}-${String(rec.month).padStart(2, '0')}`;
+      const baseFull = {
         id: rec.id,
         recurring_id: rec.recurringId,
         workspace_id: wsId,
         month: rec.month,
         year: rec.year,
+        year_month: ym,
         amount: rec.amount,
         is_paid: rec.isPaid,
         paid_at: rec.paidAt || null,
         transaction_id: rec.transactionId || null,
       };
-      await this.safeUpsert(auth.client, 'recurring_month_records', { ...base, updated_at: rec.updatedAt || new Date().toISOString() }, base);
+      const baseFallback = {
+        id: rec.id,
+        recurring_id: rec.recurringId,
+        workspace_id: wsId,
+        month: rec.month,
+        year: rec.year,
+        year_month: ym,
+        is_paid: rec.isPaid,
+        paid_at: rec.paidAt || null,
+      };
+
+      const nowIso = rec.updatedAt || new Date().toISOString();
+      try {
+        const { error } = await auth.client.from('recurring_month_records').upsert({ ...baseFull, updated_at: nowIso });
+        if (!error) return;
+      } catch {}
+
+      try {
+        const { error } = await auth.client.from('recurring_month_records').upsert(baseFull);
+        if (!error) return;
+      } catch {}
+
+      try {
+        const { error } = await auth.client.from('recurring_month_records').upsert({ ...baseFallback, updated_at: nowIso });
+        if (!error) return;
+      } catch {}
+
+      await auth.client.from('recurring_month_records').upsert(baseFallback);
     } catch {}
   }
 
@@ -310,7 +360,7 @@ export class CloudSyncService {
           assigned_to: r.assignedTo || null,
           start_date: r.startDate || null,
           end_date: r.endDate || null,
-          notes: r.notes,
+          notes: encodeRecurringNotes(r.notes, r.monthlyOverrides),
         }));
         const recWithUpdated = recurrings.map((r, idx) => ({
           ...recBase[idx],
@@ -320,22 +370,52 @@ export class CloudSyncService {
       }
 
       if (monthRecords.length > 0) {
-        const mrBase = monthRecords.map((m) => ({
-          id: m.id,
-          recurring_id: m.recurringId,
-          workspace_id: sanitizeWsId(m.workspaceId),
-          month: m.month,
-          year: m.year,
-          amount: m.amount,
-          is_paid: m.isPaid,
-          paid_at: m.paidAt || null,
-          transaction_id: m.transactionId || null,
-        }));
+        const mrFull = monthRecords.map((m) => {
+          const ym = `${m.year}-${String(m.month).padStart(2, '0')}`;
+          return {
+            id: m.id,
+            recurring_id: m.recurringId,
+            workspace_id: sanitizeWsId(m.workspaceId),
+            month: m.month,
+            year: m.year,
+            year_month: ym,
+            amount: m.amount,
+            is_paid: m.isPaid,
+            paid_at: m.paidAt || null,
+            transaction_id: m.transactionId || null,
+          };
+        });
+        const mrFallback = monthRecords.map((m) => {
+          const ym = `${m.year}-${String(m.month).padStart(2, '0')}`;
+          return {
+            id: m.id,
+            recurring_id: m.recurringId,
+            workspace_id: sanitizeWsId(m.workspaceId),
+            month: m.month,
+            year: m.year,
+            year_month: ym,
+            is_paid: m.isPaid,
+            paid_at: m.paidAt || null,
+          };
+        });
         const mrWithUpdated = monthRecords.map((m, idx) => ({
-          ...mrBase[idx],
+          ...mrFull[idx],
           updated_at: m.updatedAt || new Date().toISOString(),
         }));
-        await this.safeUpsert(client, 'recurring_month_records', mrWithUpdated, mrBase);
+
+        try {
+          const { error } = await client.from('recurring_month_records').upsert(mrWithUpdated);
+          if (error) {
+            const { error: err2 } = await client.from('recurring_month_records').upsert(mrFull);
+            if (err2) {
+              await client.from('recurring_month_records').upsert(mrFallback);
+            }
+          }
+        } catch {
+          try {
+            await client.from('recurring_month_records').upsert(mrFallback);
+          } catch {}
+        }
       }
 
       if (budgets.length > 0) {
@@ -495,6 +575,8 @@ export class CloudSyncService {
         for (const row of recRes.data) {
           if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
 
+          const { userNotes, monthlyOverrides } = decodeRecurringNotes(row.notes);
+
           const cloudItem: RecurringDebit = {
             id: row.id,
             workspaceId: row.workspace_id,
@@ -509,7 +591,8 @@ export class CloudSyncService {
             assignedTo: row.assigned_to,
             startDate: row.start_date,
             endDate: row.end_date,
-            notes: row.notes,
+            notes: userNotes,
+            monthlyOverrides: monthlyOverrides,
             createdAt: row.created_at,
             updatedAt: row.updated_at || row.created_at,
           };
@@ -518,10 +601,22 @@ export class CloudSyncService {
           if (!localItem) {
             mergedMap.set(cloudItem.id, cloudItem);
           } else {
+            // Unir overrides da nuvem com overrides locais existentes
+            const combinedOverrides = {
+              ...(localItem.monthlyOverrides || {}),
+              ...(cloudItem.monthlyOverrides || {}),
+            };
+            cloudItem.monthlyOverrides = Object.keys(combinedOverrides).length > 0 ? combinedOverrides : undefined;
+
             const localTimestamp = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
             const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.createdAt || 0).getTime();
             if (cloudTimestamp >= localTimestamp) {
               mergedMap.set(cloudItem.id, cloudItem);
+            } else {
+              mergedMap.set(cloudItem.id, {
+                ...localItem,
+                monthlyOverrides: cloudItem.monthlyOverrides || localItem.monthlyOverrides,
+              });
             }
           }
         }
@@ -530,47 +625,93 @@ export class CloudSyncService {
       }
 
       // 3. REGISTROS MENSAIS DE RECORRENTES: Smart Merge e Purga
-      if (Array.isArray(recMonthRes.data)) {
-        const localMonths = await RecurringMonthRepository.getAll();
-        const mergedMap = new Map<string, RecurringMonthRecord>();
+      const localMonths = await RecurringMonthRepository.getAll();
+      const mergedMonthMap = new Map<string, RecurringMonthRecord>();
 
-        for (const localItem of localMonths) {
-          const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
-          if (allowedWorkspaceIds.includes(mappedWsId)) {
-            mergedMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
-          }
+      for (const localItem of localMonths) {
+        const mappedWsId = localItem.workspaceId === 'ws-solo' ? personalWsId : localItem.workspaceId;
+        if (allowedWorkspaceIds.includes(mappedWsId)) {
+          mergedMonthMap.set(localItem.id, { ...localItem, workspaceId: mappedWsId });
         }
+      }
 
+      if (Array.isArray(recMonthRes.data)) {
         for (const row of recMonthRes.data) {
           if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
+
+          let monthNum = row.month;
+          let yearNum = row.year;
+          if ((!monthNum || !yearNum) && row.year_month) {
+            const parts = row.year_month.split('-');
+            yearNum = parseInt(parts[0], 10);
+            monthNum = parseInt(parts[1], 10);
+          }
+
+          const parsedAmount = (row.amount !== undefined && row.amount !== null && !isNaN(parseFloat(row.amount)))
+            ? parseFloat(row.amount)
+            : 0;
 
           const cloudItem: RecurringMonthRecord = {
             id: row.id,
             recurringId: row.recurring_id,
             workspaceId: row.workspace_id,
-            month: row.month,
-            year: row.year,
-            amount: parseFloat(row.amount),
-            isPaid: row.is_paid,
+            month: monthNum || 1,
+            year: yearNum || new Date().getFullYear(),
+            amount: parsedAmount,
+            isPaid: !!row.is_paid,
             paidAt: row.paid_at,
             transactionId: row.transaction_id,
             updatedAt: row.updated_at,
           };
 
-          const localItem = mergedMap.get(cloudItem.id);
+          const localItem = mergedMonthMap.get(cloudItem.id);
           if (!localItem) {
-            mergedMap.set(cloudItem.id, cloudItem);
+            mergedMonthMap.set(cloudItem.id, cloudItem);
           } else {
+            // Se a nuvem não tem amount válido, preserva o amount que estava no registro local
+            if (cloudItem.amount <= 0 && localItem.amount > 0) {
+              cloudItem.amount = localItem.amount;
+            }
             const localTimestamp = new Date(localItem.updatedAt || localItem.paidAt || 0).getTime();
             const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.paidAt || 0).getTime();
             if (cloudTimestamp >= localTimestamp) {
-              mergedMap.set(cloudItem.id, cloudItem);
+              mergedMonthMap.set(cloudItem.id, cloudItem);
             }
           }
         }
-
-        await RecurringMonthRepository.saveAll(Array.from(mergedMap.values()));
       }
+
+      // Injeta os monthlyOverrides de todas as recorrências salvas na nuvem
+      const allActiveRecs = await RecurringRepository.getAll();
+      for (const rec of allActiveRecs) {
+        if (rec.monthlyOverrides) {
+          for (const [ym, overrideAmount] of Object.entries(rec.monthlyOverrides)) {
+            const [yStr, mStr] = ym.split('-');
+            const yearNum = parseInt(yStr, 10);
+            const monthNum = parseInt(mStr, 10);
+            const recMonthId = `${rec.id}-${yearNum}-${monthNum}`;
+            const existingRecord = mergedMonthMap.get(recMonthId);
+            if (existingRecord) {
+              mergedMonthMap.set(recMonthId, {
+                ...existingRecord,
+                amount: overrideAmount,
+              });
+            } else {
+              mergedMonthMap.set(recMonthId, {
+                id: recMonthId,
+                recurringId: rec.id,
+                workspaceId: rec.workspaceId,
+                month: monthNum,
+                year: yearNum,
+                amount: overrideAmount,
+                isPaid: false,
+              });
+            }
+          }
+        }
+      }
+
+      await RecurringMonthRepository.saveAll(Array.from(mergedMonthMap.values()));
 
       // 4. ORÇAMENTOS: Smart Merge e Purga
       if (Array.isArray(bdgRes.data)) {

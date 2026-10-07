@@ -24,7 +24,7 @@ import { getMonthLabel } from '../core/utils/date';
 import { getCategoryMeta } from '../core/utils/categories';
 import { Ionicons } from '@expo/vector-icons';
 
-type GroupMode = 'due' | 'person' | 'category' | 'custom';
+type GroupMode = 'category' | 'person' | 'custom';
 type TypeFilter = 'all' | 'expense' | 'income';
 
 export const RecurringsScreen: React.FC = () => {
@@ -46,9 +46,8 @@ export const RecurringsScreen: React.FC = () => {
   // Filters & Modes
   const [filterVigencia, setFilterVigencia] = useState<'active' | 'all'>('active');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [groupMode, setGroupMode] = useState<GroupMode>('due');
+  const [groupMode, setGroupMode] = useState<GroupMode>('category');
   const [searchQuery, setSearchQuery] = useState('');
-  const [collapsedPaid, setCollapsedPaid] = useState(false);
   const [isDraggingActive, setIsDraggingActive] = useState(false);
 
   // Modals state
@@ -58,14 +57,6 @@ export const RecurringsScreen: React.FC = () => {
   const [editingItem, setEditingItem] = useState<{ id: string; title: string; amount: number } | null>(null);
   const [newAmountStr, setNewAmountStr] = useState('');
   const [amountScope, setAmountScope] = useState<'month' | 'forward' | 'base'>('month');
-
-  // Date context
-  const now = new Date();
-  const currentRealMonth = now.getMonth() + 1;
-  const currentRealYear = now.getFullYear();
-  const currentRealDay = now.getDate();
-  const isCurrentMonthCompetence = selectedMonth === currentRealMonth && selectedYear === currentRealYear;
-  const isPastMonthCompetence = selectedYear < currentRealYear || (selectedYear === currentRealYear && selectedMonth < currentRealMonth);
 
   // Recurrings active in this month
   const activeInMonth = useMemo(() => {
@@ -204,60 +195,6 @@ export const RecurringsScreen: React.FC = () => {
       />
     );
   };
-
-  // --- Grouping by Due Date / Urgency ---
-  const dueBuckets = useMemo(() => {
-    const overdue: RecurringDebit[] = [];
-    const dueSoon: RecurringDebit[] = [];
-    const upcoming: RecurringDebit[] = [];
-    const paused: RecurringDebit[] = [];
-    const paid: RecurringDebit[] = [];
-
-    filteredList.forEach((item) => {
-      if (item.isPaused) {
-        paused.push(item);
-        return;
-      }
-      if (item.isPaidCurrentMonth) {
-        paid.push(item);
-        return;
-      }
-
-      // If competence is past and not paid, it's overdue
-      if (isPastMonthCompetence) {
-        if (item.type !== 'income') {
-          overdue.push(item);
-        } else {
-          upcoming.push(item);
-        }
-        return;
-      }
-
-      // If current month
-      if (isCurrentMonthCompetence) {
-        if (item.dueDay < currentRealDay && item.type !== 'income') {
-          overdue.push(item);
-        } else if (item.dueDay >= currentRealDay && item.dueDay <= currentRealDay + 3) {
-          dueSoon.push(item);
-        } else {
-          upcoming.push(item);
-        }
-        return;
-      }
-
-      // Future month
-      upcoming.push(item);
-    });
-
-    const sortByDue = (a: RecurringDebit, b: RecurringDebit) => a.dueDay - b.dueDay;
-    overdue.sort(sortByDue);
-    dueSoon.sort(sortByDue);
-    upcoming.sort(sortByDue);
-    paused.sort(sortByDue);
-    paid.sort(sortByDue);
-
-    return { overdue, dueSoon, upcoming, paused, paid };
-  }, [filteredList, isPastMonthCompetence, isCurrentMonthCompetence, currentRealDay]);
 
   // --- Grouping by Person / Responsible ---
   const personGroups = useMemo(() => {
@@ -514,7 +451,7 @@ export const RecurringsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* 2nd Control Row: Grouping Modes (Vencimento | Por Pessoa | Categoria | Personalizado) */}
+        {/* 2nd Control Row: Grouping Modes (Categoria | Por Pessoa | Personalizada) */}
         <View style={styles.groupModesRow}>
           <Text style={[styles.groupModesLabel, { color: theme.textMuted }]}>
             Agrupar por:
@@ -524,22 +461,22 @@ export const RecurringsScreen: React.FC = () => {
               style={[
                 styles.groupModeChip,
                 {
-                  backgroundColor: groupMode === 'due' ? theme.primary : theme.surfaceVariant,
-                  borderColor: groupMode === 'due' ? theme.primary : theme.border,
+                  backgroundColor: groupMode === 'category' ? theme.primary : theme.surfaceVariant,
+                  borderColor: groupMode === 'category' ? theme.primary : theme.border,
                 },
               ]}
               onPress={() => {
-                setGroupMode('due');
+                setGroupMode('category');
               }}
             >
               <Ionicons
-                name="calendar-outline"
+                name="pricetag-outline"
                 size={14}
-                color={groupMode === 'due' ? '#FFF' : theme.text}
+                color={groupMode === 'category' ? '#FFF' : theme.text}
                 style={{ marginRight: 5 }}
               />
-              <Text style={[styles.groupModeChipText, { color: groupMode === 'due' ? '#FFF' : theme.text }]}>
-                Vencimento
+              <Text style={[styles.groupModeChipText, { color: groupMode === 'category' ? '#FFF' : theme.text }]}>
+                Categoria
               </Text>
             </TouchableOpacity>
 
@@ -563,29 +500,6 @@ export const RecurringsScreen: React.FC = () => {
               />
               <Text style={[styles.groupModeChipText, { color: groupMode === 'person' ? '#FFF' : theme.text }]}>
                 Por Pessoa
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.groupModeChip,
-                {
-                  backgroundColor: groupMode === 'category' ? theme.primary : theme.surfaceVariant,
-                  borderColor: groupMode === 'category' ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => {
-                setGroupMode('category');
-              }}
-            >
-              <Ionicons
-                name="pricetag-outline"
-                size={14}
-                color={groupMode === 'category' ? '#FFF' : theme.text}
-                style={{ marginRight: 5 }}
-              />
-              <Text style={[styles.groupModeChipText, { color: groupMode === 'category' ? '#FFF' : theme.text }]}>
-                Categoria
               </Text>
             </TouchableOpacity>
 
@@ -685,114 +599,29 @@ export const RecurringsScreen: React.FC = () => {
         ) : (
           <>
             {/* ======================================================== */}
-            {/* VIEW MODE 1: DUE DATE / URGENCY                         */}
+            {/* VIEW MODE 1: BY CATEGORY                                */}
             {/* ======================================================== */}
-            {groupMode === 'due' && (
+            {groupMode === 'category' && (
               <View style={{ marginTop: 8 }}>
-                {/* 1. OVERDUE (Atrasadas) */}
-                {dueBuckets.overdue.length > 0 && (
-                  <View style={styles.bucketBlock}>
-                    <View style={[styles.bucketHeader, { backgroundColor: '#EF444415', borderColor: '#EF444440' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="alert-circle" size={18} color="#EF4444" style={{ marginRight: 6 }} />
-                        <Text style={[styles.bucketTitle, { color: '#EF4444' }]}>
-                          Atrasadas ({dueBuckets.overdue.length})
+                {categoryGroups.map((group) => {
+                  const meta = getCategoryMeta(group.category as any);
+                  return (
+                    <View key={group.category} style={styles.bucketBlock}>
+                      <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
+                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                          <Ionicons name={meta.icon as any} size={18} color={meta.color || theme.primary} style={{ marginRight: 8 }} />
+                          <Text style={[styles.bucketTitle, { color: theme.text }]}>
+                            {group.category} ({group.items.length})
+                          </Text>
+                        </View>
+                        <Text style={[styles.bucketTotal, { color: theme.text }]}>
+                          {formatCurrency(group.total)}
                         </Text>
                       </View>
-                      <Text style={[styles.bucketTotal, { color: '#EF4444' }]}>
-                        {formatCurrency(dueBuckets.overdue.reduce((s, r) => s + r.amount, 0))}
-                      </Text>
+                      {group.items.map((item, idx) => renderItem(item, idx, group.items))}
                     </View>
-                    {dueBuckets.overdue.map((item, idx) => renderItem(item, idx, dueBuckets.overdue))}
-                  </View>
-                )}
-
-                {/* 2. DUE SOON (Vence Hoje / Em Breve) */}
-                {dueBuckets.dueSoon.length > 0 && (
-                  <View style={styles.bucketBlock}>
-                    <View style={[styles.bucketHeader, { backgroundColor: '#F59E0B15', borderColor: '#F59E0B40' }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="flash" size={17} color="#F59E0B" style={{ marginRight: 6 }} />
-                        <Text style={[styles.bucketTitle, { color: '#F59E0B' }]}>
-                          Vencem Hoje ou em Breve ({dueBuckets.dueSoon.length})
-                        </Text>
-                      </View>
-                      <Text style={[styles.bucketTotal, { color: '#F59E0B' }]}>
-                        {formatCurrency(dueBuckets.dueSoon.reduce((s, r) => s + r.amount, 0))}
-                      </Text>
-                    </View>
-                    {dueBuckets.dueSoon.map((item, idx) => renderItem(item, idx, dueBuckets.dueSoon))}
-                  </View>
-                )}
-
-                {/* 3. UPCOMING (Próximas do Mês) */}
-                {dueBuckets.upcoming.length > 0 && (
-                  <View style={styles.bucketBlock}>
-                    <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="calendar-outline" size={17} color={theme.text} style={{ marginRight: 6 }} />
-                        <Text style={[styles.bucketTitle, { color: theme.text }]}>
-                          Próximas do Mês ({dueBuckets.upcoming.length})
-                        </Text>
-                      </View>
-                      <Text style={[styles.bucketTotal, { color: theme.text }]}>
-                        {formatCurrency(dueBuckets.upcoming.reduce((s, r) => s + r.amount, 0))}
-                      </Text>
-                    </View>
-                    {dueBuckets.upcoming.map((item, idx) => renderItem(item, idx, dueBuckets.upcoming))}
-                  </View>
-                )}
-
-                {/* 4. PAUSED (Pausadas) */}
-                {dueBuckets.paused.length > 0 && (
-                  <View style={styles.bucketBlock}>
-                    <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="pause-circle-outline" size={17} color={theme.textMuted} style={{ marginRight: 6 }} />
-                        <Text style={[styles.bucketTitle, { color: theme.textMuted }]}>
-                          Recorrências Pausadas ({dueBuckets.paused.length})
-                        </Text>
-                      </View>
-                      <Text style={[styles.bucketTotal, { color: theme.textMuted }]}>
-                        {formatCurrency(dueBuckets.paused.reduce((s, r) => s + r.amount, 0))}
-                      </Text>
-                    </View>
-                    {dueBuckets.paused.map((item, idx) => renderItem(item, idx, dueBuckets.paused))}
-                  </View>
-                )}
-
-                {/* 5. PAID / RECEIVED (Já Pagas no Mês) */}
-                {dueBuckets.paid.length > 0 && (
-                  <View style={styles.bucketBlock}>
-                    <TouchableOpacity
-                      style={[
-                        styles.bucketHeader,
-                        { backgroundColor: '#10B98115', borderColor: '#10B98140' },
-                      ]}
-                      onPress={() => setCollapsedPaid((prev) => !prev)}
-                      activeOpacity={0.8}
-                    >
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Ionicons name="checkmark-circle" size={18} color="#10B981" style={{ marginRight: 6 }} />
-                        <Text style={[styles.bucketTitle, { color: '#10B981' }]}>
-                          Já Pagas / Recebidas ({dueBuckets.paid.length})
-                        </Text>
-                      </View>
-                      <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                        <Text style={[styles.bucketTotal, { color: '#10B981', marginRight: 8 }]}>
-                          {formatCurrency(dueBuckets.paid.reduce((s, r) => s + r.amount, 0))}
-                        </Text>
-                        <Ionicons
-                          name={collapsedPaid ? 'chevron-down' : 'chevron-up'}
-                          size={18}
-                          color="#10B981"
-                        />
-                      </View>
-                    </TouchableOpacity>
-                    {!collapsedPaid &&
-                      dueBuckets.paid.map((item, idx) => renderItem(item, idx, dueBuckets.paid))}
-                  </View>
-                )}
+                  );
+                })}
               </View>
             )}
 
@@ -883,32 +712,6 @@ export const RecurringsScreen: React.FC = () => {
               </View>
             )}
 
-            {/* ======================================================== */}
-            {/* VIEW MODE 3: BY CATEGORY                                */}
-            {/* ======================================================== */}
-            {groupMode === 'category' && (
-              <View style={{ marginTop: 8 }}>
-                {categoryGroups.map((group) => {
-                  const meta = getCategoryMeta(group.category as any);
-                  return (
-                    <View key={group.category} style={styles.bucketBlock}>
-                      <View style={[styles.bucketHeader, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}>
-                        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                          <Ionicons name={meta.icon as any} size={18} color={meta.color || theme.primary} style={{ marginRight: 8 }} />
-                          <Text style={[styles.bucketTitle, { color: theme.text }]}>
-                            {group.category} ({group.items.length})
-                          </Text>
-                        </View>
-                        <Text style={[styles.bucketTotal, { color: theme.text }]}>
-                          {formatCurrency(group.total)}
-                        </Text>
-                      </View>
-                      {group.items.map((item, idx) => renderItem(item, idx, group.items))}
-                    </View>
-                  );
-                })}
-              </View>
-            )}
 
             {/* ======================================================== */}
             {/* VIEW MODE 4: CUSTOM / MANUAL ORDER                      */}

@@ -158,12 +158,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     return allRecurrings
       .filter((r) => r.workspaceId === activeWorkspace.id)
       .map((r) => {
+        const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
         const monthRec = allRecurringMonthRecords.find(
           (m) => m.recurringId === r.id && m.month === selectedMonth && m.year === selectedYear
         );
+        const effectiveAmount = monthRec?.amount || r.monthlyOverrides?.[ym] || r.amount;
         return {
           ...r,
-          amount: monthRec ? monthRec.amount : r.amount,
+          amount: effectiveAmount,
           isPaidCurrentMonth: monthRec ? monthRec.isPaid : false,
           paidAt: monthRec?.paidAt,
         };
@@ -348,8 +350,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   const updateRecurring = async (rec: RecurringDebit) => {
+    const existing = allRecurrings.find((r) => r.id === rec.id);
     const withUpdate: RecurringDebit = {
       ...rec,
+      monthlyOverrides: rec.monthlyOverrides !== undefined ? rec.monthlyOverrides : existing?.monthlyOverrides,
       updatedAt: new Date().toISOString(),
     };
     const updated = await RecurringRepository.update(withUpdate);
@@ -372,16 +376,33 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     if (normalizedScope === 'base') {
       // 1. Updates base amount globally for all months
-      const updated = await RecurringRepository.updateAmount(id, newAmount);
+      const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+      const newOverrides = { ...(target.monthlyOverrides || {}) };
+      delete newOverrides[ym];
+      const updatedTarget: RecurringDebit = {
+        ...target,
+        amount: newAmount,
+        monthlyOverrides: Object.keys(newOverrides).length > 0 ? newOverrides : undefined,
+        updatedAt: new Date().toISOString(),
+      };
+      const updated = await RecurringRepository.update(updatedTarget);
       setAllRecurrings(updated);
-      const item = updated.find((r) => r.id === id);
-      if (item) {
-        await CloudSyncService.autoUpsertRecurring(item);
-      }
+      await CloudSyncService.autoUpsertRecurring(updatedTarget);
+
       // If current month had a record, sync it
       const existing = allRecurringMonthRecords.find(
         (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
       );
+      if (existing) {
+        const updatedMR: RecurringMonthRecord = {
+          ...existing,
+          amount: newAmount,
+          updatedAt: new Date().toISOString(),
+        };
+        const updatedMonthRecords = await RecurringMonthRepository.upsert(updatedMR);
+        setAllRecurringMonthRecords(updatedMonthRecords);
+        await CloudSyncService.autoUpsertRecurringMonthRecord(updatedMR);
+      }
       if (existing?.isPaid && existing.transactionId) {
         const tx = allTransactions.find((t) => t.id === existing.transactionId);
         if (tx) {
@@ -400,13 +421,14 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const monthRecord: RecurringMonthRecord = {
         id: `${id}-${selectedYear}-${selectedMonth}`,
         recurringId: id,
-        workspaceId: activeWorkspace.id,
+        workspaceId: target.workspaceId || activeWorkspace.id,
         month: selectedMonth,
         year: selectedYear,
         amount: newAmount,
         isPaid: existing ? existing.isPaid : false,
         paidAt: existing?.paidAt,
         transactionId: existing?.transactionId,
+        updatedAt: new Date().toISOString(),
       };
 
       // Also update linked transaction amount if already paid
@@ -423,6 +445,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       const updatedMonthRecords = await RecurringMonthRepository.upsert(monthRecord);
       setAllRecurringMonthRecords(updatedMonthRecords);
       await CloudSyncService.autoUpsertRecurringMonthRecord(monthRecord);
+
+      // Persistir o override mensal diretamente na recorrência para sincronização robusta com a nuvem
+      const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+      const newOverrides = {
+        ...(target.monthlyOverrides || {}),
+        [ym]: newAmount,
+      };
+      const updatedTarget: RecurringDebit = {
+        ...target,
+        monthlyOverrides: newOverrides,
+        updatedAt: new Date().toISOString(),
+      };
+      const updatedRecs = await RecurringRepository.update(updatedTarget);
+      setAllRecurrings(updatedRecs);
+      await CloudSyncService.autoUpsertRecurring(updatedTarget);
     } else if (normalizedScope === 'forward') {
       // 3. A partir deste mês em diante:
       // Preserva o valor antigo nos meses anteriores e cria o novo valor a partir de agora
@@ -467,6 +504,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
           id: `${newRec.id}-${selectedYear}-${selectedMonth}`,
           recurringId: newRec.id,
           amount: newAmount,
+          updatedAt: new Date().toISOString(),
         };
         await RecurringMonthRepository.upsert(newMonthRecord);
         await CloudSyncService.autoUpsertRecurringMonthRecord(newMonthRecord);
@@ -501,11 +539,15 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const newIsPaid = existing ? !existing.isPaid : true;
     let transactionId = existing?.transactionId;
 
+    const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+    const currentAmount = (existing && existing.amount > 0)
+      ? existing.amount
+      : (target.monthlyOverrides?.[ym] || target.amount);
+
     if (newIsPaid) {
       // Create transaction in Extrato for this competence
       const dayNum = Math.min(Math.max(target.dueDay || 1, 1), 28);
       const txDate = new Date(selectedYear, selectedMonth - 1, dayNum, 12, 0, 0).toISOString();
-      const currentAmount = existing ? existing.amount : target.amount;
 
       const newTx: Transaction = {
         id: `tx-rec-${id}-${selectedYear}-${selectedMonth}`,
@@ -539,10 +581,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       workspaceId: activeWorkspace.id,
       month: selectedMonth,
       year: selectedYear,
-      amount: existing ? existing.amount : target.amount,
+      amount: currentAmount,
       isPaid: newIsPaid,
       paidAt: newIsPaid ? new Date().toISOString() : undefined,
       transactionId,
+      updatedAt: new Date().toISOString(),
     };
 
     const updatedMonthRecords = await RecurringMonthRepository.upsert(monthRecord);
