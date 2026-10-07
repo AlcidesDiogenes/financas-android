@@ -67,16 +67,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addModalInitialMode, setAddModalInitialMode] = useState<'expense' | 'income' | 'saving'>('expense');
   const [reportModalVisible, setReportModalVisible] = useState(false);
-  const [radarEnabled, setRadarEnabled] = useState(false);
   const [reportMode, setReportMode] = useState<'realized' | 'projected'>('realized');
-
-  useEffect(() => {
-    AsyncStorage.getItem('@financas:radar_enabled')
-      .then((val) => {
-        setRadarEnabled(val === 'true');
-      })
-      .catch(() => {});
-  }, []);
 
   const handleOpenAddModal = (mode: 'expense' | 'income' | 'saving' = 'expense') => {
     if (!canEdit) return;
@@ -96,53 +87,6 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const paidRecurringsCount = activeRecurrings.filter((r) => r.isPaidCurrentMonth).length;
   const totalRecurringsCount = activeRecurrings.length;
   const recentTransactions = transactions.slice(0, 4);
-
-  // Radar de Vencimentos inteligente
-  const now = new Date();
-  const currentRealDay = now.getDate();
-  const currentRealMonth = now.getMonth() + 1;
-  const currentRealYear = now.getFullYear();
-  const isCurrentCompetence = selectedMonth === currentRealMonth && selectedYear === currentRealYear;
-  const isPastCompetence = selectedYear < currentRealYear || (selectedYear === currentRealYear && selectedMonth < currentRealMonth);
-
-  const radarStats = useMemo(() => {
-    const overdue: RecurringDebit[] = [];
-    const dueToday: RecurringDebit[] = [];
-    const dueSoon: RecurringDebit[] = [];
-
-    activeRecurrings
-      .filter((r) => !r.isPaidCurrentMonth && !r.isPaused && r.type !== 'income')
-      .forEach((r) => {
-        if (isPastCompetence) {
-          overdue.push(r);
-        } else if (isCurrentCompetence) {
-          if (r.dueDay < currentRealDay) {
-            overdue.push(r);
-          } else if (r.dueDay === currentRealDay) {
-            dueToday.push(r);
-          } else if (r.dueDay <= currentRealDay + 3) {
-            dueSoon.push(r);
-          }
-        } else {
-          dueSoon.push(r);
-        }
-      });
-
-    const urgentList = [...overdue, ...dueToday, ...dueSoon];
-    const overdueAmount = overdue.reduce((s, r) => s + r.amount, 0);
-    const todayAmount = dueToday.reduce((s, r) => s + r.amount, 0);
-
-    return {
-      overdue,
-      dueToday,
-      dueSoon,
-      urgentList,
-      overdueAmount,
-      todayAmount,
-      hasUrgent: overdue.length > 0 || dueToday.length > 0,
-      isAllPaid: activeRecurrings.length > 0 && pendingRecurrings.length === 0,
-    };
-  }, [activeRecurrings, pendingRecurrings.length, isPastCompetence, isCurrentCompetence, currentRealDay]);
 
   // Fechamento de Contas do Espaço Compartilhado (Splitwise)
   const householdSplit = useMemo(() => {
@@ -483,74 +427,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* ======================================================== */}
         {/* RADAR DE VENCIMENTOS INTELIGENTE                        */}
         {/* ======================================================== */}
-        {radarEnabled && radarStats.hasUrgent && (
-          <Card
-            variant="elevated"
-            style={[
-              styles.radarCard,
-              {
-                borderColor: radarStats.overdue.length > 0 ? '#EF4444' : '#F59E0B',
-                backgroundColor: theme.card,
-              },
-            ]}
-          >
-            <View style={styles.radarHeaderRow}>
-              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-                <Ionicons
-                  name={radarStats.overdue.length > 0 ? 'alert-circle' : 'flash'}
-                  size={20}
-                  color={radarStats.overdue.length > 0 ? '#EF4444' : '#F59E0B'}
-                  style={{ marginRight: 6 }}
-                />
-                <Text
-                  style={[
-                    styles.radarTitle,
-                    { color: radarStats.overdue.length > 0 ? '#EF4444' : '#F59E0B' },
-                  ]}
-                >
-                  Radar de Vencimentos
-                </Text>
-              </View>
-              <TouchableOpacity onPress={onNavigateToRecurrings}>
-                <Text style={[styles.radarSeeAll, { color: theme.primary }]}>Ver Todas</Text>
-              </TouchableOpacity>
-            </View>
-
-            {radarStats.overdue.length > 0 && (
-              <View style={[styles.radarBadgeRow, { backgroundColor: '#EF444415' }]}>
-                <Ionicons name="warning-outline" size={15} color="#EF4444" />
-                <Text style={[styles.radarBadgeText, { color: '#EF4444' }]}>
-                  {radarStats.overdue.length} {radarStats.overdue.length === 1 ? 'conta atrasada' : 'contas atrasadas'} ({formatCurrency(radarStats.overdueAmount)})
-                </Text>
-              </View>
-            )}
-
-            {radarStats.dueToday.length > 0 && (
-              <View style={[styles.radarBadgeRow, { backgroundColor: '#F59E0B15', marginTop: 6 }]}>
-                <Ionicons name="time-outline" size={15} color="#F59E0B" />
-                <Text style={[styles.radarBadgeText, { color: '#F59E0B' }]}>
-                  {radarStats.dueToday.length} {radarStats.dueToday.length === 1 ? 'conta vence HOJE!' : 'contas vencem HOJE!'} ({formatCurrency(radarStats.todayAmount)})
-                </Text>
-              </View>
-            )}
-
-            <View style={{ marginTop: 10 }}>
-              {radarStats.urgentList.slice(0, 3).map((item) => (
-                <RecurringItem
-                  key={item.id}
-                  recurring={item}
-                  onTogglePaid={toggleRecurringPaid}
-                  canEdit={canEdit}
-                  showVigencia={false}
-                  selectedMonth={selectedMonth}
-                  selectedYear={selectedYear}
-                />
-              ))}
-            </View>
-          </Card>
-        )}
-
-        {radarEnabled && radarStats.isAllPaid && (
+        {activeRecurrings.length > 0 && pendingRecurrings.length === 0 && (
           <View style={[styles.allPaidBanner, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
             <Ionicons name="checkmark-circle" size={22} color="#10B981" />
             <View style={{ flex: 1, marginLeft: 10 }}>
@@ -631,13 +508,13 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           allTransactions={allTransactions}
         />
 
-        {/* Recurrings to pay preview (fallback se não houver urgente ou radar desativado) */}
-        {(!radarEnabled || !radarStats.hasUrgent) && pendingRecurrings.length > 0 && (
+        {/* Recurrings to pay preview */}
+        {pendingRecurrings.length > 0 && (
           <>
             <View style={styles.sectionHeader}>
               <View>
                 <Text style={[styles.sectionTitle, { color: theme.text }]}>
-                  Contas a Vencer no Mês
+                  Contas Fixas Pendentes
                 </Text>
                 <Text style={[styles.sectionSubtitle, { color: theme.textMuted }]}>
                   {pendingRecurrings.length} débitos pendentes de pagamento
@@ -1070,38 +947,6 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginLeft: 6,
-  },
-  radarCard: {
-    padding: 16,
-    borderRadius: 16,
-    borderWidth: 1.5,
-    marginBottom: 16,
-  },
-  radarHeaderRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    marginBottom: 10,
-  },
-  radarTitle: {
-    fontSize: 15,
-    fontWeight: '800',
-  },
-  radarSeeAll: {
-    fontSize: 12,
-    fontWeight: '700',
-  },
-  radarBadgeRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-    gap: 6,
-  },
-  radarBadgeText: {
-    fontSize: 12,
-    fontWeight: '700',
   },
   allPaidBanner: {
     flexDirection: 'row',
