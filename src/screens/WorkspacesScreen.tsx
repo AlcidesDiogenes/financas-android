@@ -44,6 +44,7 @@ export const WorkspacesScreen: React.FC = () => {
     deleteWorkspace,
     leaveWorkspace,
     joinWorkspaceByCode,
+    regenerateWorkspaceInviteCode,
     currentUserRole,
     pendingRequestsCount,
     refreshWorkspaces,
@@ -94,6 +95,34 @@ export const WorkspacesScreen: React.FC = () => {
     } catch {
       Alert.alert('Código de Convite', `Código: ${activeWorkspace.inviteCode}`);
     }
+  };
+
+  const handleRegenerateCode = () => {
+    if (activeWorkspace.id === 'ws-solo' || activeWorkspace.type === 'solo') return;
+    if (currentUserRole !== 'owner') {
+      Alert.alert('Permissão', 'Apenas o proprietário pode gerar um novo código de convite.');
+      return;
+    }
+
+    Alert.alert(
+      'Gerar Novo Código de Convite?',
+      'O código atual deixará de funcionar para novas pessoas entrarem. Os membros que já fazem parte deste espaço continuarão com acesso normal.\n\nDeseja continuar?',
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Gerar Novo Código',
+          style: 'default',
+          onPress: async () => {
+            const res = await regenerateWorkspaceInviteCode(activeWorkspace.id);
+            if (res.success) {
+              Alert.alert('Sucesso 🎉', `Novo código gerado:\n\n${res.newCode}`);
+            } else {
+              Alert.alert('Aviso', res.message);
+            }
+          },
+        },
+      ]
+    );
   };
 
   const handleDeleteWorkspace = () => {
@@ -597,14 +626,27 @@ export const WorkspacesScreen: React.FC = () => {
                 </Text>
               </View>
 
-              <TouchableOpacity
-                style={[styles.shareBtn, { backgroundColor: theme.primary }]}
-                onPress={handleShareCode}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="share-social-outline" size={15} color="#FFF" style={{ marginRight: 6 }} />
-                <Text style={styles.shareBtnText}>Compartilhar</Text>
-              </TouchableOpacity>
+              <View style={{ flexDirection: 'row', alignItems: 'center' }}>
+                {currentUserRole === 'owner' && (
+                  <TouchableOpacity
+                    style={[styles.regenBtn, { borderColor: theme.border, backgroundColor: theme.card, marginRight: 8 }]}
+                    onPress={handleRegenerateCode}
+                    activeOpacity={0.7}
+                    accessibilityLabel="Gerar novo código de convite"
+                  >
+                    <Ionicons name="refresh-outline" size={16} color={theme.text} />
+                  </TouchableOpacity>
+                )}
+
+                <TouchableOpacity
+                  style={[styles.shareBtn, { backgroundColor: theme.primary }]}
+                  onPress={handleShareCode}
+                  activeOpacity={0.8}
+                >
+                  <Ionicons name="share-social-outline" size={15} color="#FFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.shareBtnText}>Compartilhar</Text>
+                </TouchableOpacity>
+              </View>
             </View>
           )}
 
@@ -1066,7 +1108,7 @@ export const WorkspacesScreen: React.FC = () => {
       >
         <Input
           label="Código do Convite"
-          placeholder="Ex: FIN-7842"
+          placeholder="Ex: FIN-7K8M-9P2W"
           autoCapitalize="characters"
           value={joinCode}
           onChangeText={(val) => {
@@ -1075,6 +1117,9 @@ export const WorkspacesScreen: React.FC = () => {
           }}
           error={joinCodeError}
         />
+        <Text style={{ fontSize: 12, color: theme.textMuted, marginTop: -4, marginBottom: 12 }}>
+          💡 Você pode digitar o código com ou sem o prefixo &quot;FIN-&quot;.
+        </Text>
         <Button
           title="Vincular Espaço"
           onPress={handleJoinWorkspace}
@@ -1514,6 +1559,13 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 8,
     borderRadius: 8,
+  },
+  regenBtn: {
+    padding: 8,
+    borderRadius: 8,
+    borderWidth: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
   },
   shareBtnText: {
     color: '#FFF',

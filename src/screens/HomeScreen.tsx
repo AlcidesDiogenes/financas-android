@@ -79,13 +79,21 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     () => recurrings.filter((r) => isRecurringActiveInMonth(r, selectedMonth, selectedYear)),
     [recurrings, selectedMonth, selectedYear]
   );
-  const pendingRecurrings = activeRecurrings.filter((r) => !r.isPaidCurrentMonth);
+  // Débitos/Despesas fixas recorrentes (proventos não são contas a pagar)
+  const expenseRecurrings = useMemo(
+    () => activeRecurrings.filter((r) => r.type !== 'income'),
+    [activeRecurrings]
+  );
+  const pendingRecurrings = useMemo(
+    () => expenseRecurrings.filter((r) => !r.isPaidCurrentMonth),
+    [expenseRecurrings]
+  );
   const pendingRecurringsAmount = useMemo(
     () => pendingRecurrings.reduce((sum, r) => sum + r.amount, 0),
     [pendingRecurrings]
   );
-  const paidRecurringsCount = activeRecurrings.filter((r) => r.isPaidCurrentMonth).length;
-  const totalRecurringsCount = activeRecurrings.length;
+  const paidRecurringsCount = expenseRecurrings.filter((r) => r.isPaidCurrentMonth).length;
+  const totalRecurringsCount = expenseRecurrings.length;
   const recentTransactions = transactions.slice(0, 4);
 
   // Fechamento de Contas do Espaço Compartilhado (Splitwise)
@@ -427,7 +435,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* ======================================================== */}
         {/* RADAR DE VENCIMENTOS INTELIGENTE                        */}
         {/* ======================================================== */}
-        {activeRecurrings.length > 0 && pendingRecurrings.length === 0 && (
+        {expenseRecurrings.length > 0 && pendingRecurrings.length === 0 && (
           <View style={[styles.allPaidBanner, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
             <Ionicons name="checkmark-circle" size={22} color="#10B981" />
             <View style={{ flex: 1, marginLeft: 10 }}>

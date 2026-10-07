@@ -9,26 +9,60 @@ import { Transaction } from '../../modules/transactions/types';
 import { RecurringDebit, RecurringMonthRecord } from '../../modules/recurrings/types';
 import { Budget } from '../../modules/budgets/types';
 import { Goal } from '../../modules/goals/types';
-export function encodeRecurringNotes(userNotes?: string | null, monthlyOverrides?: Record<string, number>): string | null {
-  const cleanUserNotes = (userNotes || '').replace(/\s*<!--__MONTHLY_OVERRIDES__:[\s\S]*?-->/g, '').trim();
-  if (!monthlyOverrides || Object.keys(monthlyOverrides).length === 0) {
+export function encodeRecurringNotes(
+  userNotes?: string | null,
+  monthlyOverrides?: Record<string, number>,
+  excludedMonths?: string[]
+): string | null {
+  const cleanUserNotes = (userNotes || '')
+    .replace(/\s*<!--__MONTHLY_OVERRIDES__:[\s\S]*?-->/g, '')
+    .replace(/\s*<!--__EXCLUDED_MONTHS__:[\s\S]*?-->/g, '')
+    .trim();
+
+  const tags: string[] = [];
+  if (monthlyOverrides && Object.keys(monthlyOverrides).length > 0) {
+    tags.push(`<!--__MONTHLY_OVERRIDES__:${JSON.stringify(monthlyOverrides)}-->`);
+  }
+  if (excludedMonths && excludedMonths.length > 0) {
+    tags.push(`<!--__EXCLUDED_MONTHS__:${JSON.stringify(excludedMonths)}-->`);
+  }
+
+  if (tags.length === 0) {
     return cleanUserNotes || null;
   }
-  const tag = `<!--__MONTHLY_OVERRIDES__:${JSON.stringify(monthlyOverrides)}-->`;
-  return cleanUserNotes ? `${cleanUserNotes}\n${tag}` : tag;
+  const tagBlock = tags.join('\n');
+  return cleanUserNotes ? `${cleanUserNotes}\n${tagBlock}` : tagBlock;
 }
 
-export function decodeRecurringNotes(rawNotes?: string | null): { userNotes?: string; monthlyOverrides?: Record<string, number> } {
-  if (!rawNotes) return { userNotes: undefined, monthlyOverrides: undefined };
-  const match = rawNotes.match(/<!--__MONTHLY_OVERRIDES__:([\s\S]*?)-->/);
+export function decodeRecurringNotes(rawNotes?: string | null): {
+  userNotes?: string;
+  monthlyOverrides?: Record<string, number>;
+  excludedMonths?: string[];
+} {
+  if (!rawNotes) return { userNotes: undefined, monthlyOverrides: undefined, excludedMonths: undefined };
+
+  const matchOverrides = rawNotes.match(/<!--__MONTHLY_OVERRIDES__:([\s\S]*?)-->/);
   let monthlyOverrides: Record<string, number> | undefined = undefined;
-  if (match && match[1]) {
+  if (matchOverrides && matchOverrides[1]) {
     try {
-      monthlyOverrides = JSON.parse(match[1]);
+      monthlyOverrides = JSON.parse(matchOverrides[1]);
     } catch {}
   }
-  const userNotes = rawNotes.replace(/\s*<!--__MONTHLY_OVERRIDES__:[\s\S]*?-->/g, '').trim() || undefined;
-  return { userNotes, monthlyOverrides };
+
+  const matchExclusions = rawNotes.match(/<!--__EXCLUDED_MONTHS__:([\s\S]*?)-->/);
+  let excludedMonths: string[] | undefined = undefined;
+  if (matchExclusions && matchExclusions[1]) {
+    try {
+      excludedMonths = JSON.parse(matchExclusions[1]);
+    } catch {}
+  }
+
+  const userNotes = rawNotes
+    .replace(/\s*<!--__MONTHLY_OVERRIDES__:[\s\S]*?-->/g, '')
+    .replace(/\s*<!--__EXCLUDED_MONTHS__:[\s\S]*?-->/g, '')
+    .trim() || undefined;
+
+  return { userNotes, monthlyOverrides, excludedMonths };
 }
 
 export class CloudSyncService {
@@ -124,7 +158,7 @@ export class CloudSyncService {
         assigned_to: r.assignedTo || null,
         start_date: r.startDate || null,
         end_date: r.endDate || null,
-        notes: encodeRecurringNotes(r.notes, r.monthlyOverrides),
+        notes: encodeRecurringNotes(r.notes, r.monthlyOverrides, r.excludedMonths),
       };
       await this.safeUpsert(auth.client, 'recurrings', { ...base, updated_at: r.updatedAt || new Date().toISOString() }, base);
     } catch {}
@@ -360,7 +394,7 @@ export class CloudSyncService {
           assigned_to: r.assignedTo || null,
           start_date: r.startDate || null,
           end_date: r.endDate || null,
-          notes: encodeRecurringNotes(r.notes, r.monthlyOverrides),
+          notes: encodeRecurringNotes(r.notes, r.monthlyOverrides, r.excludedMonths),
         }));
         const recWithUpdated = recurrings.map((r, idx) => ({
           ...recBase[idx],
@@ -575,7 +609,7 @@ export class CloudSyncService {
         for (const row of recRes.data) {
           if (!allowedWorkspaceIds.includes(row.workspace_id)) continue;
 
-          const { userNotes, monthlyOverrides } = decodeRecurringNotes(row.notes);
+          const { userNotes, monthlyOverrides, excludedMonths } = decodeRecurringNotes(row.notes);
 
           const cloudItem: RecurringDebit = {
             id: row.id,
@@ -593,6 +627,7 @@ export class CloudSyncService {
             endDate: row.end_date,
             notes: userNotes,
             monthlyOverrides: monthlyOverrides,
+            excludedMonths: excludedMonths,
             createdAt: row.created_at,
             updatedAt: row.updated_at || row.created_at,
           };
@@ -608,6 +643,12 @@ export class CloudSyncService {
             };
             cloudItem.monthlyOverrides = Object.keys(combinedOverrides).length > 0 ? combinedOverrides : undefined;
 
+            const combinedExclusions = Array.from(new Set([
+              ...(localItem.excludedMonths || []),
+              ...(cloudItem.excludedMonths || []),
+            ]));
+            cloudItem.excludedMonths = combinedExclusions.length > 0 ? combinedExclusions : undefined;
+
             const localTimestamp = new Date(localItem.updatedAt || localItem.createdAt || 0).getTime();
             const cloudTimestamp = new Date(cloudItem.updatedAt || cloudItem.createdAt || 0).getTime();
             if (cloudTimestamp >= localTimestamp) {
@@ -616,6 +657,7 @@ export class CloudSyncService {
               mergedMap.set(cloudItem.id, {
                 ...localItem,
                 monthlyOverrides: cloudItem.monthlyOverrides || localItem.monthlyOverrides,
+                excludedMonths: cloudItem.excludedMonths || localItem.excludedMonths,
               });
             }
           }

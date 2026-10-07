@@ -7,13 +7,17 @@ import {
   TouchableOpacity,
   Alert,
   TextInput,
+  Platform,
+  UIManager,
+  LayoutAnimation,
 } from 'react-native';
 import { useTheme } from '../core/theme/ThemeContext';
 import { useFinance } from '../modules/FinanceContext';
 import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
 import { RecurringItem } from '../modules/recurrings/components/RecurringItem';
 import { AddRecurringModal } from '../modules/recurrings/components/AddRecurringModal';
-import { RecurringDebit, isRecurringActiveInMonth } from '../modules/recurrings/types';
+import { DeleteRecurringScopeModal } from '../modules/recurrings/components/DeleteRecurringScopeModal';
+import { RecurringDebit, isRecurringActiveInMonth, DeleteRecurringScope } from '../modules/recurrings/types';
 import { formatCurrency } from '../core/utils/currency';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
@@ -24,7 +28,11 @@ import { getMonthLabel } from '../core/utils/date';
 import { getCategoryMeta } from '../core/utils/categories';
 import { Ionicons } from '@expo/vector-icons';
 
-type GroupMode = 'category' | 'person' | 'custom';
+if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
+  UIManager.setLayoutAnimationEnabledExperimental(true);
+}
+
+type GroupMode = 'list' | 'category' | 'person';
 type TypeFilter = 'all' | 'expense' | 'income';
 
 export const RecurringsScreen: React.FC = () => {
@@ -39,16 +47,14 @@ export const RecurringsScreen: React.FC = () => {
     updateRecurringAmount,
     toggleRecurringPaid,
     batchSetRecurringsPaid,
-    reorderRecurrings,
     deleteRecurring,
   } = useFinance();
 
   // Filters & Modes
   const [filterVigencia, setFilterVigencia] = useState<'active' | 'all'>('active');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
-  const [groupMode, setGroupMode] = useState<GroupMode>('category');
+  const [groupMode, setGroupMode] = useState<GroupMode>('list');
   const [searchQuery, setSearchQuery] = useState('');
-  const [isDraggingActive, setIsDraggingActive] = useState(false);
 
   // Modals state
   const [modalVisible, setModalVisible] = useState(false);
@@ -57,6 +63,21 @@ export const RecurringsScreen: React.FC = () => {
   const [editingItem, setEditingItem] = useState<{ id: string; title: string; amount: number } | null>(null);
   const [newAmountStr, setNewAmountStr] = useState('');
   const [amountScope, setAmountScope] = useState<'month' | 'forward' | 'base'>('month');
+
+  // Modal de escopo de exclusão
+  const [deleteScopeModalVisible, setDeleteScopeModalVisible] = useState(false);
+  const [recurringToDelete, setRecurringToDelete] = useState<RecurringDebit | null>(null);
+
+  const handleRequestDelete = (rec: RecurringDebit) => {
+    setRecurringToDelete(rec);
+    setDeleteScopeModalVisible(true);
+  };
+
+  const handleConfirmDeleteScope = async (id: string, scope: DeleteRecurringScope) => {
+    await deleteRecurring(id, scope);
+    setDeleteScopeModalVisible(false);
+    setRecurringToDelete(null);
+  };
 
   // Recurrings active in this month
   const activeInMonth = useMemo(() => {
@@ -101,6 +122,7 @@ export const RecurringsScreen: React.FC = () => {
       hasIncome: incomes.length > 0,
       hasExpense: expenses.length > 0,
       pendingCount: expenses.filter((r) => !r.isPaidCurrentMonth).length,
+      pendingIncomeCount: incomes.filter((r) => !r.isPaidCurrentMonth).length,
     };
   }, [activeInMonth]);
 
@@ -129,18 +151,30 @@ export const RecurringsScreen: React.FC = () => {
     return list;
   }, [baseList, typeFilter, searchQuery]);
 
-  // Handler for Batch Pay All Pending
-  const handleBatchPayPending = (itemsToPay: RecurringDebit[], titlePrefix = 'Liquidar Contas Pendentes') => {
-    const pendingItems = itemsToPay.filter((r) => !r.isPaidCurrentMonth && !r.isPaused);
+  // Handler for Batch Pay All Pending Expenses (apenas débitos/despesas)
+  const handleBatchPayPending = (itemsToPay: RecurringDebit[], titlePrefix = 'Liquidar Débitos Pendentes') => {
+    const pendingItems = itemsToPay.filter(
+      (r) => r.type !== 'income' && !r.isPaidCurrentMonth && !r.isPaused
+    );
     if (pendingItems.length === 0) {
-      Alert.alert('Tudo Pago!', 'Não há contas pendentes nesta lista.');
+      Alert.alert('Tudo Pago!', 'Não há contas ou débitos pendentes nesta lista.');
       return;
     }
 
     const totalAmount = pendingItems.reduce((acc, cur) => acc + cur.amount, 0);
+    const previewItems = pendingItems
+      .slice(0, 5)
+      .map((item) => `• ${item.title}: ${formatCurrency(item.amount)}`)
+      .join('\n');
+    const remainingCount = pendingItems.length - 5;
+    const remainingText =
+      remainingCount > 0
+        ? `\n• + ${remainingCount} ${remainingCount === 1 ? 'outro débito' : 'outros débitos'}`
+        : '';
+
     Alert.alert(
       titlePrefix,
-      `Deseja marcar como PAGAS ${pendingItems.length} ${pendingItems.length === 1 ? 'conta pendente' : 'contas pendentes'}, totalizando ${formatCurrency(totalAmount)}?`,
+      `Deseja marcar como PAGAS ${pendingItems.length} ${pendingItems.length === 1 ? 'conta pendente' : 'contas pendentes'}?\n\nTotal: ${formatCurrency(totalAmount)}\n\nItens incluídos:\n${previewItems}${remainingText}`,
       [
         { text: 'Cancelar', style: 'cancel' },
         {
@@ -154,21 +188,50 @@ export const RecurringsScreen: React.FC = () => {
     );
   };
 
-  // Reorder by drag handler
-  const handleDragMove = async (id: string, slotsMoved: number) => {
-    const list = [...customList];
-    const curIdx = list.findIndex((r) => r.id === id);
-    if (curIdx === -1) return;
-    const targetIdx = Math.max(0, Math.min(list.length - 1, curIdx + slotsMoved));
-    if (targetIdx === curIdx) return;
+  // Handler for Batch Receive All Pending Incomes (apenas proventos/receitas)
+  const handleBatchReceivePending = (itemsToReceive: RecurringDebit[], titlePrefix = 'Receber Proventos Pendentes') => {
+    const pendingItems = itemsToReceive.filter(
+      (r) => r.type === 'income' && !r.isPaidCurrentMonth && !r.isPaused
+    );
+    if (pendingItems.length === 0) {
+      Alert.alert('Tudo Recebido!', 'Não há proventos ou rendas pendentes nesta lista.');
+      return;
+    }
 
-    const [movedItem] = list.splice(curIdx, 1);
-    list.splice(targetIdx, 0, movedItem);
-    await reorderRecurrings(list);
+    const totalAmount = pendingItems.reduce((acc, cur) => acc + cur.amount, 0);
+    const previewItems = pendingItems
+      .slice(0, 5)
+      .map((item) => `• ${item.title}: ${formatCurrency(item.amount)}`)
+      .join('\n');
+    const remainingCount = pendingItems.length - 5;
+    const remainingText =
+      remainingCount > 0
+        ? `\n• + ${remainingCount} ${remainingCount === 1 ? 'outro provento' : 'outros proventos'}`
+        : '';
+
+    Alert.alert(
+      titlePrefix,
+      `Deseja marcar como RECEBIDOS ${pendingItems.length} ${pendingItems.length === 1 ? 'provento pendente' : 'proventos pendentes'}?\n\nTotal: ${formatCurrency(totalAmount)}\n\nItens incluídos:\n${previewItems}${remainingText}`,
+      [
+        { text: 'Cancelar', style: 'cancel' },
+        {
+          text: 'Sim, Marcar Recebidos',
+          onPress: async () => {
+            const ids = pendingItems.map((r) => r.id);
+            await batchSetRecurringsPaid(ids, true);
+          },
+        },
+      ]
+    );
   };
 
+  // --- Lista ordenada naturalmente por dia de vencimento (dueDay) ---
+  const sortedList = useMemo(() => {
+    return [...filteredList].sort((a, b) => a.dueDay - b.dueDay);
+  }, [filteredList]);
+
   // Helper renderer for a single Recurring item
-  const renderItem = (item: RecurringDebit, index: number, list: RecurringDebit[]) => {
+  const renderItem = (item: RecurringDebit) => {
     return (
       <RecurringItem
         key={item.id}
@@ -185,13 +248,11 @@ export const RecurringsScreen: React.FC = () => {
           setModalVisible(true);
         }}
         onDelete={deleteRecurring}
+        onRequestDelete={handleRequestDelete}
         canEdit={canEdit}
         showVigencia={filterVigencia === 'all'}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
-        onDragStart={() => setIsDraggingActive(true)}
-        onDragMove={(id, slots) => handleDragMove(id, slots)}
-        onDragEnd={() => setIsDraggingActive(false)}
       />
     );
   };
@@ -215,6 +276,15 @@ export const RecurringsScreen: React.FC = () => {
       const pendingExpense = totalExpense - paidExpense;
       const pendingCount = expenses.filter((r) => !r.isPaidCurrentMonth).length;
 
+      const incomes = items.filter((r) => r.type === 'income' && !r.isPaused);
+      const totalIncome = incomes.reduce((s, r) => s + r.amount, 0);
+      const receivedIncome = incomes.filter((r) => r.isPaidCurrentMonth).reduce((s, r) => s + r.amount, 0);
+      const pendingIncome = totalIncome - receivedIncome;
+      const pendingIncomeCount = incomes.filter((r) => !r.isPaidCurrentMonth).length;
+
+      // Ordenar os itens da pessoa pelo dia de vencimento
+      items.sort((a, b) => a.dueDay - b.dueDay);
+
       return {
         person,
         items,
@@ -222,13 +292,21 @@ export const RecurringsScreen: React.FC = () => {
         paidExpense,
         pendingExpense,
         pendingCount,
+        totalIncome,
+        receivedIncome,
+        pendingIncome,
+        pendingIncomeCount,
       };
     });
 
-    // Sort by total expense descending
-    groups.sort((a, b) => b.totalExpense - a.totalExpense);
+    // Sort by total expense descending (or total income when viewing income tab)
+    if (typeFilter === 'income') {
+      groups.sort((a, b) => b.totalIncome - a.totalIncome);
+    } else {
+      groups.sort((a, b) => b.totalExpense - a.totalExpense);
+    }
     return groups;
-  }, [filteredList]);
+  }, [filteredList, typeFilter]);
 
   // --- Grouping by Category ---
   const categoryGroups = useMemo(() => {
@@ -242,6 +320,8 @@ export const RecurringsScreen: React.FC = () => {
     });
 
     const groups = Array.from(map.entries()).map(([category, items]) => {
+      // Ordenar os itens dentro de cada categoria pelo dia de vencimento
+      items.sort((a, b) => a.dueDay - b.dueDay);
       const total = items.reduce((s, r) => s + r.amount, 0);
       const paid = items.filter((r) => r.isPaidCurrentMonth).reduce((s, r) => s + r.amount, 0);
       return {
@@ -256,11 +336,6 @@ export const RecurringsScreen: React.FC = () => {
     return groups;
   }, [filteredList]);
 
-  // --- Custom Order list ---
-  const customList = useMemo(() => {
-    return [...filteredList].sort((a, b) => (a.orderIndex ?? 0) - (b.orderIndex ?? 0));
-  }, [filteredList]);
-
   return (
     <View style={[styles.container, { backgroundColor: theme.background }]}>
       {/* Competence Selector */}
@@ -271,12 +346,11 @@ export const RecurringsScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
-        scrollEnabled={!isDraggingActive}
       >
         {/* Recurrings Summary Card */}
         <Card variant="elevated" style={styles.summaryCard}>
           <View style={styles.summaryHeaderRow}>
-            <View>
+            <View style={{ flex: 1, marginRight: 8 }}>
               <Text style={[styles.summaryTitle, { color: theme.textMuted }]}>
                 {typeFilter === 'income' ? 'Renda Fixa Prevista' : 'Contas Recorrentes'} ({getMonthLabel(selectedMonth, selectedYear)})
               </Text>
@@ -285,15 +359,33 @@ export const RecurringsScreen: React.FC = () => {
               </Text>
             </View>
 
-            {canEdit && stats.pendingCount > 0 && typeFilter !== 'income' && (
-              <TouchableOpacity
-                style={[styles.payAllBtn, { backgroundColor: theme.primary }]}
-                onPress={() => handleBatchPayPending(activeInMonth, 'Liquidar Todas as Pendentes')}
-                activeOpacity={0.8}
-              >
-                <Ionicons name="checkmark-done" size={16} color="#FFF" />
-                <Text style={styles.payAllBtnText}>Pagar Todas</Text>
-              </TouchableOpacity>
+            {canEdit && (
+              <View style={{ alignItems: 'flex-end', gap: 6 }}>
+                {/* Botão de Pagar Débitos (aparece em "Todas" ou "Despesas" quando houver débitos pendentes) */}
+                {typeFilter !== 'income' && stats.pendingCount > 0 && (
+                  <TouchableOpacity
+                    style={[styles.payAllBtn, { backgroundColor: theme.primary }]}
+                    onPress={() => handleBatchPayPending(activeInMonth, 'Liquidar Débitos Pendentes')}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="checkmark-done" size={15} color="#FFF" />
+                    <Text style={styles.payAllBtnText}>Pagar Débitos ({stats.pendingCount})</Text>
+                  </TouchableOpacity>
+                )}
+
+                {/* Botão de Receber Proventos (aparece em "Rendas", ou em "Todas" se houver proventos pendentes) */}
+                {((typeFilter === 'income' && stats.pendingIncomeCount > 0) ||
+                  (typeFilter === 'all' && stats.pendingIncomeCount > 0 && stats.hasIncome)) && (
+                  <TouchableOpacity
+                    style={[styles.payAllBtn, { backgroundColor: '#10B981' }]}
+                    onPress={() => handleBatchReceivePending(activeInMonth, 'Receber Proventos Pendentes')}
+                    activeOpacity={0.8}
+                  >
+                    <Ionicons name="cash-outline" size={15} color="#FFF" />
+                    <Text style={styles.payAllBtnText}>Receber Rendas ({stats.pendingIncomeCount})</Text>
+                  </TouchableOpacity>
+                )}
+              </View>
             )}
           </View>
 
@@ -451,12 +543,33 @@ export const RecurringsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* 2nd Control Row: Grouping Modes (Categoria | Por Pessoa | Personalizada) */}
+        {/* 2nd Control Row: View Modes (Lista Geral | Por Categoria | Por Pessoa) */}
         <View style={styles.groupModesRow}>
           <Text style={[styles.groupModesLabel, { color: theme.textMuted }]}>
-            Agrupar por:
+            Visualização:
           </Text>
           <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8 }}>
+            <TouchableOpacity
+              style={[
+                styles.groupModeChip,
+                {
+                  backgroundColor: groupMode === 'list' ? theme.primary : theme.surfaceVariant,
+                  borderColor: groupMode === 'list' ? theme.primary : theme.border,
+                },
+              ]}
+              onPress={() => setGroupMode('list')}
+            >
+              <Ionicons
+                name="list-outline"
+                size={14}
+                color={groupMode === 'list' ? '#FFF' : theme.text}
+                style={{ marginRight: 5 }}
+              />
+              <Text style={[styles.groupModeChipText, { color: groupMode === 'list' ? '#FFF' : theme.text }]}>
+                Lista Geral
+              </Text>
+            </TouchableOpacity>
+
             <TouchableOpacity
               style={[
                 styles.groupModeChip,
@@ -465,9 +578,7 @@ export const RecurringsScreen: React.FC = () => {
                   borderColor: groupMode === 'category' ? theme.primary : theme.border,
                 },
               ]}
-              onPress={() => {
-                setGroupMode('category');
-              }}
+              onPress={() => setGroupMode('category')}
             >
               <Ionicons
                 name="pricetag-outline"
@@ -476,7 +587,7 @@ export const RecurringsScreen: React.FC = () => {
                 style={{ marginRight: 5 }}
               />
               <Text style={[styles.groupModeChipText, { color: groupMode === 'category' ? '#FFF' : theme.text }]}>
-                Categoria
+                Por Categoria
               </Text>
             </TouchableOpacity>
 
@@ -488,9 +599,7 @@ export const RecurringsScreen: React.FC = () => {
                   borderColor: groupMode === 'person' ? theme.primary : theme.border,
                 },
               ]}
-              onPress={() => {
-                setGroupMode('person');
-              }}
+              onPress={() => setGroupMode('person')}
             >
               <Ionicons
                 name="people-outline"
@@ -500,29 +609,6 @@ export const RecurringsScreen: React.FC = () => {
               />
               <Text style={[styles.groupModeChipText, { color: groupMode === 'person' ? '#FFF' : theme.text }]}>
                 Por Pessoa
-              </Text>
-            </TouchableOpacity>
-
-            <TouchableOpacity
-              style={[
-                styles.groupModeChip,
-                {
-                  backgroundColor: groupMode === 'custom' ? theme.primary : theme.surfaceVariant,
-                  borderColor: groupMode === 'custom' ? theme.primary : theme.border,
-                },
-              ]}
-              onPress={() => {
-                setGroupMode('custom');
-              }}
-            >
-              <Ionicons
-                name="reorder-two-outline"
-                size={14}
-                color={groupMode === 'custom' ? '#FFF' : theme.text}
-                style={{ marginRight: 5 }}
-              />
-              <Text style={[styles.groupModeChipText, { color: groupMode === 'custom' ? '#FFF' : theme.text }]}>
-                Personalizada
               </Text>
             </TouchableOpacity>
           </ScrollView>
@@ -571,16 +657,6 @@ export const RecurringsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Reorder Helper Tip */}
-        {groupMode === 'custom' && (
-          <View style={[styles.reorderBanner, { backgroundColor: '#3B82F615', borderColor: '#3B82F640' }]}>
-            <Ionicons name="hand-left-outline" size={17} color="#3B82F6" style={{ marginRight: 8 }} />
-            <Text style={[styles.reorderBannerText, { color: '#3B82F6' }]}>
-              Segure qualquer conta por 2,5 segundos para arrastar e reorganizar.
-            </Text>
-          </View>
-        )}
-
         {/* Empty State */}
         {filteredList.length === 0 ? (
           <Card variant="flat" style={{ alignItems: 'center', paddingVertical: 40, marginTop: 12 }}>
@@ -599,7 +675,16 @@ export const RecurringsScreen: React.FC = () => {
         ) : (
           <>
             {/* ======================================================== */}
-            {/* VIEW MODE 1: BY CATEGORY                                */}
+            {/* VIEW MODE 1: LISTA GERAL                                */}
+            {/* ======================================================== */}
+            {groupMode === 'list' && (
+              <View style={{ marginTop: 8 }}>
+                {sortedList.map(renderItem)}
+              </View>
+            )}
+
+            {/* ======================================================== */}
+            {/* VIEW MODE 2: BY CATEGORY                                */}
             {/* ======================================================== */}
             {groupMode === 'category' && (
               <View style={{ marginTop: 8 }}>
@@ -618,7 +703,7 @@ export const RecurringsScreen: React.FC = () => {
                           {formatCurrency(group.total)}
                         </Text>
                       </View>
-                      {group.items.map((item, idx) => renderItem(item, idx, group.items))}
+                      {group.items.map(renderItem)}
                     </View>
                   );
                 })}
@@ -690,35 +775,37 @@ export const RecurringsScreen: React.FC = () => {
                             {group.person}
                           </Text>
                           <Text style={[styles.personSubtitle, { color: theme.textMuted }]}>
-                            {group.items.length} {group.items.length === 1 ? 'item' : 'itens'} • {formatCurrency(group.totalExpense)}
+                            {typeFilter === 'income'
+                              ? `${group.items.length} ${group.items.length === 1 ? 'item' : 'itens'} • ${formatCurrency(group.totalIncome)}`
+                              : `${group.items.length} ${group.items.length === 1 ? 'item' : 'itens'} • ${formatCurrency(group.totalExpense)}`}
                           </Text>
                         </View>
                       </View>
 
-                      {canEdit && group.pendingCount > 0 && (
+                      {canEdit && typeFilter !== 'income' && group.pendingCount > 0 && (
                         <TouchableOpacity
                           style={[styles.personPayBtn, { backgroundColor: theme.primary }]}
-                          onPress={() => handleBatchPayPending(group.items, `Liquidar Contas de ${group.person}`)}
+                          onPress={() => handleBatchPayPending(group.items, `Liquidar Débitos de ${group.person}`)}
                         >
                           <Ionicons name="checkmark-done" size={14} color="#FFF" style={{ marginRight: 4 }} />
-                          <Text style={styles.personPayBtnText}>Pagar ({group.pendingCount})</Text>
+                          <Text style={styles.personPayBtnText}>Pagar Débitos ({group.pendingCount})</Text>
+                        </TouchableOpacity>
+                      )}
+
+                      {canEdit && typeFilter === 'income' && group.pendingIncomeCount > 0 && (
+                        <TouchableOpacity
+                          style={[styles.personPayBtn, { backgroundColor: '#10B981' }]}
+                          onPress={() => handleBatchReceivePending(group.items, `Receber Proventos de ${group.person}`)}
+                        >
+                          <Ionicons name="cash-outline" size={14} color="#FFF" style={{ marginRight: 4 }} />
+                          <Text style={styles.personPayBtnText}>Receber ({group.pendingIncomeCount})</Text>
                         </TouchableOpacity>
                       )}
                     </View>
 
-                    {group.items.map((item, idx) => renderItem(item, idx, group.items))}
+                    {group.items.map(renderItem)}
                   </View>
                 ))}
-              </View>
-            )}
-
-
-            {/* ======================================================== */}
-            {/* VIEW MODE 4: CUSTOM / MANUAL ORDER                      */}
-            {/* ======================================================== */}
-            {groupMode === 'custom' && (
-              <View style={{ marginTop: 8 }}>
-                {customList.map((item, idx) => renderItem(item, idx, customList))}
               </View>
             )}
           </>
@@ -726,7 +813,7 @@ export const RecurringsScreen: React.FC = () => {
       </ScrollView>
 
       {/* FAB: Novo Item Recorrente */}
-      {canEdit && !isDraggingActive && (
+      {canEdit && (
         <View style={styles.fabWrap}>
           <Button
             title="Novo Item Recorrente"
@@ -760,7 +847,28 @@ export const RecurringsScreen: React.FC = () => {
           setModalVisible(false);
           setFullEditItem(null);
         }}
-        onDelete={deleteRecurring}
+        onDelete={(id) => {
+          setModalVisible(false);
+          const item = recurrings.find((r) => r.id === id) || fullEditItem;
+          if (item) {
+            handleRequestDelete(item);
+          } else {
+            deleteRecurring(id);
+          }
+        }}
+      />
+
+      {/* Modal Escolha de Escopo de Exclusão */}
+      <DeleteRecurringScopeModal
+        visible={deleteScopeModalVisible}
+        recurring={recurringToDelete}
+        selectedMonth={selectedMonth}
+        selectedYear={selectedYear}
+        onClose={() => {
+          setDeleteScopeModalVisible(false);
+          setRecurringToDelete(null);
+        }}
+        onConfirm={handleConfirmDeleteScope}
       />
 
       {/* Modal Ajuste Rápido de Valor */}
@@ -1070,31 +1178,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     fontWeight: '700',
     textAlign: 'center',
-  },
-  reorderBanner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 10,
-    borderRadius: 10,
-    borderWidth: 1,
-    marginBottom: 12,
-  },
-  reorderBannerText: {
-    flex: 1,
-    fontSize: 12,
-    fontWeight: '600',
-  },
-  reorderCloseBtn: {
-    backgroundColor: '#3B82F6',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
-    borderRadius: 6,
-    marginLeft: 8,
-  },
-  reorderCloseBtnText: {
-    color: '#FFF',
-    fontSize: 11,
-    fontWeight: '700',
   },
   bucketBlock: {
     marginBottom: 14,

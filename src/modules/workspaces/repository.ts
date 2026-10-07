@@ -9,6 +9,58 @@ export const getPersonalWorkspaceId = (userId?: string): string => {
   return userId ? `ws-${userId}` : 'ws-solo';
 };
 
+const UNAMBIGUOUS_CHARS = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
+
+export const generateWorkspaceInviteCode = (): string => {
+  let part1 = '';
+  let part2 = '';
+  for (let i = 0; i < 4; i++) {
+    const idx1 = Math.floor(Math.random() * UNAMBIGUOUS_CHARS.length);
+    part1 += UNAMBIGUOUS_CHARS[idx1];
+    const idx2 = Math.floor(Math.random() * UNAMBIGUOUS_CHARS.length);
+    part2 += UNAMBIGUOUS_CHARS[idx2];
+  }
+  return `FIN-${part1}-${part2}`;
+};
+
+export const generateUniqueWorkspaceInviteCode = async (
+  existingWorkspaces?: Workspace[],
+  client?: any
+): Promise<string> => {
+  let attempts = 0;
+  while (attempts < 10) {
+    attempts++;
+    const candidate = generateWorkspaceInviteCode();
+
+    // 1. Verifica no cache local de espaços
+    if (existingWorkspaces && existingWorkspaces.some((w) => w.inviteCode === candidate)) {
+      continue;
+    }
+
+    // 2. Verifica ativamente no Supabase na nuvem se algum espaço no mundo já possui este código
+    if (client) {
+      try {
+        const { data } = await client
+          .from('workspaces')
+          .select('id')
+          .eq('invite_code', candidate)
+          .maybeSingle();
+
+        if (data && data.id) {
+          // Colisão detectada! Descarta e repete o sorteio imediatamente.
+          continue;
+        }
+      } catch {
+        // Em caso de falha de conexão temporária, a entropia de 1 trilhão garante unicidade
+      }
+    }
+
+    return candidate;
+  }
+
+  return generateWorkspaceInviteCode();
+};
+
 export const createDefaultPersonalWorkspace = (
   userId?: string,
   userName?: string,

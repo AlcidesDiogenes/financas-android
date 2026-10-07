@@ -226,21 +226,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
 
   const handleConfirmDelete = () => {
     if (!initialData || !onDelete) return;
-    Alert.alert(
-      'Excluir Conta Recorrente?',
-      `Deseja realmente excluir "${initialData.title}"?\n\nEsta conta não aparecerá mais nos meses futuros e passados.`,
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Excluir',
-          style: 'destructive',
-          onPress: () => {
-            onDelete(initialData.id);
-            onClose();
-          },
-        },
-      ]
-    );
+    onDelete(initialData.id);
   };
 
   const isShared = activeWorkspace.type === 'shared';

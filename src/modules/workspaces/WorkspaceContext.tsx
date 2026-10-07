@@ -6,6 +6,8 @@ import {
   DEFAULT_WORKSPACES,
   getPersonalWorkspaceId,
   createDefaultPersonalWorkspace,
+  generateWorkspaceInviteCode,
+  generateUniqueWorkspaceInviteCode,
 } from './repository';
 import { useAuth } from '../../services/auth/AuthContext';
 import { SupabaseService } from '../../services/supabase/supabaseClient';
@@ -32,6 +34,7 @@ interface WorkspaceContextType {
   deleteWorkspace: (workspaceId: string) => Promise<{ success: boolean; message: string }>;
   leaveWorkspace: (workspaceId: string) => Promise<{ success: boolean; message: string }>;
   joinWorkspaceByCode: (inviteCode: string) => Promise<{ success: boolean; message: string }>;
+  regenerateWorkspaceInviteCode: (workspaceId: string) => Promise<{ success: boolean; newCode?: string; message: string }>;
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
   pendingRequestsCount: number;
@@ -318,13 +321,23 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     const ownerEmail = user?.email || 'meu@email.com';
     const ownerName = user?.name || 'Você';
 
+    const currentList = await WorkspaceRepository.getWorkspaces();
+    let supabaseClient: any = null;
+    try {
+      supabaseClient = await SupabaseService.getClient();
+    } catch {}
+
+    const uniqueInviteCode = isShared
+      ? await generateUniqueWorkspaceInviteCode(currentList, supabaseClient)
+      : 'SOLO-PRIVADO';
+
     const randomSuffix = Math.random().toString(36).substring(2, 8);
     const newWs: Workspace = {
       id: `ws-${Date.now()}-${randomSuffix}`,
       name,
       description,
       type: isShared ? 'shared' : 'solo',
-      inviteCode: `FIN-${Math.floor(1000 + Math.random() * 9000)}`,
+      inviteCode: uniqueInviteCode,
       createdAt: new Date().toISOString(),
       members: [
         {
@@ -337,7 +350,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       ],
     };
 
-    const currentList = await WorkspaceRepository.getWorkspaces();
     const updated = [...currentList.filter((w) => w.id !== newWs.id), newWs];
     setWorkspaces(updated);
     await WorkspaceRepository.saveWorkspaces(updated);
@@ -692,6 +704,36 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     return { success: true, message: `Você saiu do espaço "${target.name}" com sucesso.` };
   };
 
+  const regenerateWorkspaceInviteCode = async (
+    workspaceId: string
+  ): Promise<{ success: boolean; newCode?: string; message: string }> => {
+    const target = workspaces.find((w) => w.id === workspaceId);
+    if (!target) return { success: false, message: 'Espaço não encontrado.' };
+    if (target.type === 'solo' || target.id === 'ws-solo') {
+      return { success: false, message: 'Espaços privados não possuem código de convite.' };
+    }
+
+    let supabaseClient: any = null;
+    try {
+      supabaseClient = await SupabaseService.getClient();
+    } catch {}
+
+    const newCode = await generateUniqueWorkspaceInviteCode(workspaces, supabaseClient);
+    const updated = workspaces.map((w) =>
+      w.id === workspaceId ? { ...w, inviteCode: newCode } : w
+    );
+    setWorkspaces(updated);
+    await WorkspaceRepository.saveWorkspaces(updated);
+
+    if (supabaseClient) {
+      try {
+        await supabaseClient.from('workspaces').update({ invite_code: newCode }).eq('id', workspaceId);
+      } catch {}
+    }
+
+    return { success: true, newCode, message: 'Novo código de convite gerado com sucesso!' };
+  };
+
   const joinWorkspaceByCode = async (
     inviteCode: string
   ): Promise<{ success: boolean; message: string }> => {
@@ -701,15 +743,35 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
 
     try {
       const client = await SupabaseService.getClient();
-      const code = inviteCode.trim().toUpperCase();
+      const rawCode = inviteCode.trim().toUpperCase().replace(/\s+/g, '');
+      const cleanChars = rawCode.replace(/^FIN-?/, '').replace(/[^A-Z0-9]/g, '');
 
-      const { data, error } = await client
-        .from('workspaces')
-        .select('*')
-        .eq('invite_code', code)
-        .single();
+      const candidateCodes: string[] = [rawCode];
+      if (cleanChars.length === 8) {
+        candidateCodes.push(`FIN-${cleanChars.slice(0, 4)}-${cleanChars.slice(4)}`);
+      } else if (cleanChars.length === 4) {
+        candidateCodes.push(`FIN-${cleanChars}`);
+      }
+      if (!rawCode.startsWith('FIN-')) {
+        candidateCodes.push(`FIN-${rawCode}`);
+      }
 
-      if (error || !data) {
+      const uniqueCandidates = Array.from(new Set(candidateCodes));
+      let data: any = null;
+
+      for (const candidate of uniqueCandidates) {
+        const { data: found } = await client
+          .from('workspaces')
+          .select('*')
+          .eq('invite_code', candidate)
+          .maybeSingle();
+        if (found) {
+          data = found;
+          break;
+        }
+      }
+
+      if (!data) {
         return { success: false, message: 'Código de convite não encontrado.' };
       }
 
@@ -781,6 +843,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         deleteWorkspace,
         leaveWorkspace,
         joinWorkspaceByCode,
+        regenerateWorkspaceInviteCode,
         currentUserRole,
         canEdit,
         pendingRequestsCount,

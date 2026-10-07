@@ -4,7 +4,7 @@ import { useWorkspace } from './workspaces/WorkspaceContext';
 import { useAuth } from '../services/auth/AuthContext';
 import { Transaction, MonthlySummary } from './transactions/types';
 import { TransactionRepository } from './transactions/repository';
-import { RecurringDebit, RecurringMonthRecord, isRecurringActiveInMonth } from './recurrings/types';
+import { RecurringDebit, RecurringMonthRecord, isRecurringActiveInMonth, DeleteRecurringScope } from './recurrings/types';
 import { RecurringRepository } from './recurrings/repository';
 import { RecurringMonthRepository } from './recurrings/monthRepository';
 import { Budget, BudgetProgress, isBudgetActiveInMonth } from './budgets/types';
@@ -52,7 +52,7 @@ interface FinanceContextType {
   toggleRecurringPaid: (id: string) => Promise<void>;
   batchSetRecurringsPaid: (ids: string[], isPaid: boolean) => Promise<void>;
   reorderRecurrings: (reordered: RecurringDebit[]) => Promise<void>;
-  deleteRecurring: (id: string) => Promise<void>;
+  deleteRecurring: (id: string, scope?: DeleteRecurringScope) => Promise<void>;
   saveBudget: (
     category: Budget['category'],
     limitAmount: number,
@@ -155,10 +155,11 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   // Recurrings mapped dynamically for selectedMonth and selectedYear
   const recurrings = useMemo(() => {
+    const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
     return allRecurrings
       .filter((r) => r.workspaceId === activeWorkspace.id)
+      .filter((r) => !r.excludedMonths?.includes(ym))
       .map((r) => {
-        const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
         const monthRec = allRecurringMonthRecords.find(
           (m) => m.recurringId === r.id && m.month === selectedMonth && m.year === selectedYear
         );
@@ -624,14 +625,83 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     } catch {}
   };
 
-  const deleteRecurring = async (id: string) => {
-    const updated = await RecurringRepository.delete(id);
-    setAllRecurrings(updated);
-    await CloudSyncService.autoDeleteRecurring(id);
+  const deleteRecurring = async (id: string, scope: DeleteRecurringScope = 'all') => {
+    const target = allRecurrings.find((r) => r.id === id);
+    if (!target) return;
 
-    // Also delete any month records associated with this recurring
-    const updatedMonthRecords = await RecurringMonthRepository.deleteByRecurringId(id);
-    setAllRecurringMonthRecords(updatedMonthRecords);
+    const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
+
+    // Limpar o mês atual se estava pago (remove transação vinculada do Extrato)
+    const existingIndex = allRecurringMonthRecords.findIndex(
+      (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
+    );
+    const existingMonthRecord = existingIndex >= 0 ? allRecurringMonthRecords[existingIndex] : null;
+
+    if (existingMonthRecord?.transactionId) {
+      await TransactionRepository.delete(existingMonthRecord.transactionId);
+      setAllTransactions((prev) => prev.filter((t) => t.id !== existingMonthRecord.transactionId));
+      await CloudSyncService.autoDeleteTransaction(existingMonthRecord.transactionId);
+    }
+
+    if (scope === 'month') {
+      // 1. Exclui apenas da competência selecionada
+      const currentExcluded = target.excludedMonths || [];
+      const newExcluded = Array.from(new Set([...currentExcluded, ym]));
+
+      const updatedTarget: RecurringDebit = {
+        ...target,
+        excludedMonths: newExcluded,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const updatedRecs = await RecurringRepository.update(updatedTarget);
+      setAllRecurrings(updatedRecs);
+      await CloudSyncService.autoUpsertRecurring(updatedTarget);
+
+      // Remove o registro do mês selecionado se existia
+      if (existingMonthRecord) {
+        const remainingMonths = allRecurringMonthRecords.filter((m) => m.id !== existingMonthRecord.id);
+        await RecurringMonthRepository.saveAll(remainingMonths);
+        setAllRecurringMonthRecords(remainingMonths);
+      }
+    } else if (scope === 'forward') {
+      // 2. Desta competência em diante: encerra vigência no mês anterior
+      let prevYear = selectedYear;
+      let prevMonth = selectedMonth - 1;
+      if (prevMonth < 1) {
+        prevMonth = 12;
+        prevYear -= 1;
+      }
+      const prevCompFormatted = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
+
+      const updatedTarget: RecurringDebit = {
+        ...target,
+        endDate: prevCompFormatted,
+        updatedAt: new Date().toISOString(),
+      };
+
+      const updatedRecs = await RecurringRepository.update(updatedTarget);
+      setAllRecurrings(updatedRecs);
+      await CloudSyncService.autoUpsertRecurring(updatedTarget);
+
+      // Remove registros mensais deste mês em diante
+      const remainingMonths = allRecurringMonthRecords.filter((m) => {
+        if (m.recurringId !== id) return true;
+        const mComp = `${m.year}-${String(m.month).padStart(2, '0')}`;
+        return mComp < ym;
+      });
+      await RecurringMonthRepository.saveAll(remainingMonths);
+      setAllRecurringMonthRecords(remainingMonths);
+    } else {
+      // 3. De todos os meses (Definitivo)
+      const updated = await RecurringRepository.delete(id);
+      setAllRecurrings(updated);
+      await CloudSyncService.autoDeleteRecurring(id);
+
+      // Also delete any month records associated with this recurring
+      const updatedMonthRecords = await RecurringMonthRepository.deleteByRecurringId(id);
+      setAllRecurringMonthRecords(updatedMonthRecords);
+    }
   };
 
   const saveBudget = async (

@@ -24,7 +24,10 @@ export interface RecurringDebit {
   orderIndex?: number; // Ordem personalizada de exibição
   isPaused?: boolean;  // Pausado temporariamente
   monthlyOverrides?: Record<string, number>; // Overrides de valor por competência (ex: { '2026-10': 150 })
+  excludedMonths?: string[]; // Competências excluídas da recorrência (ex: ['2026-10'])
 }
+
+export type DeleteRecurringScope = 'month' | 'forward' | 'all';
 
 export interface RecurringMonthRecord {
   id: string; // `${recurringId}-${year}-${month}`

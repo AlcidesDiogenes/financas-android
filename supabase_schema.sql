@@ -227,5 +227,7 @@ CREATE INDEX IF NOT EXISTS idx_recurring_month_records_workspace ON public.recur
 CREATE INDEX IF NOT EXISTS idx_budgets_workspace ON public.budgets(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_goals_workspace ON public.goals(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_members_email ON public.workspace_members(email);
+CREATE INDEX IF NOT EXISTS idx_workspaces_invite_code ON public.workspaces(invite_code);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_invite_code_unique ON public.workspaces(invite_code) WHERE invite_code IS NOT NULL AND invite_code != 'SOLO-PRIVADO';
 
 

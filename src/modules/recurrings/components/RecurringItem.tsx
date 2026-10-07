@@ -1,4 +1,4 @@
-import React, { useRef, useMemo, useState } from 'react';
+import React, { useRef, useMemo } from 'react';
 import {
   View,
   Text,
@@ -7,7 +7,6 @@ import {
   Animated,
   PanResponder,
   Alert,
-  Vibration,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { RecurringDebit } from '../types';
@@ -23,13 +22,11 @@ interface RecurringItemProps {
   onEditAmount?: (id: string, currentAmount: number, title: string) => void;
   onEditFull?: (recurring: RecurringDebit) => void;
   onDelete?: (id: string) => void;
+  onRequestDelete?: (recurring: RecurringDebit) => void;
   canEdit?: boolean;
   showVigencia?: boolean;
   selectedMonth?: number;
   selectedYear?: number;
-  onDragStart?: (id: string) => void;
-  onDragMove?: (id: string, slotsMoved: number) => void;
-  onDragEnd?: () => void;
 }
 
 export const RecurringItem: React.FC<RecurringItemProps> = ({
@@ -38,26 +35,18 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
   onEditAmount,
   onEditFull,
   onDelete,
+  onRequestDelete,
   canEdit = true,
   showVigencia = true,
   selectedMonth,
   selectedYear,
-  onDragStart,
-  onDragMove,
-  onDragEnd,
 }) => {
   const { theme } = useTheme();
   const { swipePayDirection } = useSwipeAction();
   const meta = getCategoryMeta(recurring.category);
 
   const translateX = useRef(new Animated.Value(0)).current;
-  const translateY = useRef(new Animated.Value(0)).current;
   const currentDx = useRef(0);
-
-  const holdTimer = useRef<any>(null);
-  const startPos = useRef({ x: 0, y: 0 });
-  const isDraggingRef = useRef(false);
-  const [isDragging, setIsDragging] = useState(false);
 
   const itemStatus = useMemo(() => {
     if (recurring.isPaused) {
@@ -121,28 +110,29 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
     return PanResponder.create({
       onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        if (!canEdit || isDraggingRef.current) return false;
+        if (!canEdit) return false;
         // Só captura se o movimento horizontal for predominante e perceptível
         const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.8;
         const hasMoved = Math.abs(gestureState.dx) > 12;
         if (!isHorizontal || !hasMoved) return false;
 
+        const hasDelete = !!onRequestDelete || !!onDelete;
         if (gestureState.dx > 0) {
           const isDeleteSide = swipePayDirection === 'left';
-          if (isDeleteSide && !onDelete) return false;
+          if (isDeleteSide && !hasDelete) return false;
         } else {
           const isDeleteSide = swipePayDirection === 'right';
-          if (isDeleteSide && !onDelete) return false;
+          if (isDeleteSide && !hasDelete) return false;
         }
 
         return true;
       },
       onPanResponderMove: (_, gestureState) => {
-        if (isDraggingRef.current) return;
         let dx = gestureState.dx;
-        if (swipePayDirection === 'right' && dx < 0 && !onDelete) {
+        const hasDelete = !!onRequestDelete || !!onDelete;
+        if (swipePayDirection === 'right' && dx < 0 && !hasDelete) {
           dx = 0;
-        } else if (swipePayDirection === 'left' && dx > 0 && !onDelete) {
+        } else if (swipePayDirection === 'left' && dx > 0 && !hasDelete) {
           dx = 0;
         }
         const maxDrag = 130;
@@ -151,7 +141,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = clampedDx;
       },
       onPanResponderRelease: () => {
-        if (isDraggingRef.current) return;
         const threshold = 65;
         const dx = currentDx.current;
 
@@ -167,24 +156,28 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             bounciness: 4,
           }).start();
           onTogglePaid(recurring.id);
-        } else if (isDeleteSide && onDelete) {
+        } else if (isDeleteSide && (onRequestDelete || onDelete)) {
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
             bounciness: 4,
           }).start();
-          Alert.alert(
-            'Excluir Conta Recorrente?',
-            `Deseja realmente excluir "${recurring.title}"?`,
-            [
-              { text: 'Cancelar', style: 'cancel' },
-              {
-                text: 'Excluir',
-                style: 'destructive',
-                onPress: () => onDelete(recurring.id),
-              },
-            ]
-          );
+          if (onRequestDelete) {
+            onRequestDelete(recurring);
+          } else if (onDelete) {
+            Alert.alert(
+              'Excluir Conta Recorrente?',
+              `Deseja realmente excluir "${recurring.title}"?`,
+              [
+                { text: 'Cancelar', style: 'cancel' },
+                {
+                  text: 'Excluir',
+                  style: 'destructive',
+                  onPress: () => onDelete(recurring.id),
+                },
+              ]
+            );
+          }
         } else {
           Animated.spring(translateX, {
             toValue: 0,
@@ -203,7 +196,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = 0;
       },
     });
-  }, [canEdit, onDelete, swipePayDirection, recurring, onTogglePaid, translateX]);
+  }, [canEdit, onDelete, onRequestDelete, swipePayDirection, recurring, onTogglePaid, translateX]);
 
   // Interpolações de opacidade para os fundos de ação
   const leftOpacity = translateX.interpolate({
@@ -278,88 +271,17 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         </Animated.View>
       </View>
 
-      {/* Card da Frente Deslizável & Arrastável por 4 segundos */}
+      {/* Card da Frente Deslizável */}
       <Animated.View
         style={[
           styles.container,
           {
             backgroundColor: theme.card,
-            borderColor: isDragging ? theme.primary : theme.border,
-            borderWidth: isDragging ? 2 : 1,
-            transform: [{ translateX }, { translateY }, { scale: isDragging ? 1.03 : 1 }],
-            zIndex: isDragging ? 9999 : 1,
-            elevation: isDragging ? 10 : 0,
-            shadowColor: '#000',
-            shadowOffset: { width: 0, height: isDragging ? 6 : 0 },
-            shadowOpacity: isDragging ? 0.35 : 0,
-            shadowRadius: isDragging ? 8 : 0,
+            borderColor: theme.border,
+            borderWidth: 1,
+            transform: [{ translateX }],
           },
         ]}
-        onTouchStart={(e) => {
-          if (!canEdit || !onDragStart) return;
-          startPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
-          if (holdTimer.current) clearTimeout(holdTimer.current);
-
-          // Segurar por 2,5 segundos (2500ms)
-          holdTimer.current = setTimeout(() => {
-            isDraggingRef.current = true;
-            setIsDragging(true);
-            try {
-              Vibration.vibrate([0, 120, 60, 120]);
-            } catch {}
-            onDragStart(recurring.id);
-          }, 2500);
-        }}
-        onTouchMove={(e) => {
-          if (!isDraggingRef.current) {
-            // Se o dedo se mover mais de 8px antes de completar os 2,5 segundos, cancela o timer
-            // Isso evita completamente que o modo ative sozinho ao rolar a tela ou ao dar toques rápidos!
-            const dx = Math.abs(e.nativeEvent.pageX - startPos.current.x);
-            const dy = Math.abs(e.nativeEvent.pageY - startPos.current.y);
-            if (dx > 8 || dy > 8) {
-              if (holdTimer.current) {
-                clearTimeout(holdTimer.current);
-                holdTimer.current = null;
-              }
-            }
-          } else {
-            // Em modo arrasto ativo após 2,5 segundos:
-            const dy = e.nativeEvent.pageY - startPos.current.y;
-            translateY.setValue(dy);
-          }
-        }}
-        onTouchEnd={(e) => {
-          if (holdTimer.current) {
-            clearTimeout(holdTimer.current);
-            holdTimer.current = null;
-          }
-          if (isDraggingRef.current) {
-            isDraggingRef.current = false;
-            setIsDragging(false);
-            const dy = e.nativeEvent.pageY - startPos.current.y;
-            const slotsMoved = Math.round(dy / 68);
-            if (slotsMoved !== 0 && onDragMove) {
-              onDragMove(recurring.id, slotsMoved);
-              try {
-                Vibration.vibrate(50);
-              } catch {}
-            }
-            Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
-            if (onDragEnd) onDragEnd();
-          }
-        }}
-        onTouchCancel={() => {
-          if (holdTimer.current) {
-            clearTimeout(holdTimer.current);
-            holdTimer.current = null;
-          }
-          if (isDraggingRef.current) {
-            isDraggingRef.current = false;
-            setIsDragging(false);
-            Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
-            if (onDragEnd) onDragEnd();
-          }
-        }}
         {...panResponder.panHandlers}
       >
         <View style={[styles.iconContainer, { backgroundColor: `${meta.color}20` }]}>
@@ -371,12 +293,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>
               {recurring.title}
             </Text>
-            {isDragging ? (
-              <View style={[styles.urgencyTag, { backgroundColor: `${theme.primary}25`, borderColor: theme.primary }]}>
-                <Ionicons name="move" size={10} color={theme.primary} style={{ marginRight: 3 }} />
-                <Text style={[styles.urgencyTagText, { color: theme.primary }]}>Arrastando</Text>
-              </View>
-            ) : recurring.isPaused ? (
+            {recurring.isPaused ? (
               <View style={[styles.urgencyTag, { backgroundColor: '#6B728020', borderColor: '#6B728040' }]}>
                 <Ionicons name="pause" size={10} color="#6B7280" style={{ marginRight: 3 }} />
                 <Text style={[styles.urgencyTagText, { color: '#6B7280' }]}>Pausada</Text>
