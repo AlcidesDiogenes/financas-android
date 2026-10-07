@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import {
   View,
   Text,
@@ -7,6 +7,7 @@ import {
   TouchableOpacity,
   Alert,
 } from 'react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useTheme } from '../core/theme/ThemeContext';
 import { usePrivacy } from '../core/theme/PrivacyContext';
 import { useWorkspace } from '../modules/workspaces/WorkspaceContext';
@@ -66,6 +67,16 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
   const [addModalVisible, setAddModalVisible] = useState(false);
   const [addModalInitialMode, setAddModalInitialMode] = useState<'expense' | 'income' | 'saving'>('expense');
   const [reportModalVisible, setReportModalVisible] = useState(false);
+  const [radarEnabled, setRadarEnabled] = useState(false);
+  const [reportMode, setReportMode] = useState<'realized' | 'projected'>('realized');
+
+  useEffect(() => {
+    AsyncStorage.getItem('@financas:radar_enabled')
+      .then((val) => {
+        setRadarEnabled(val === 'true');
+      })
+      .catch(() => {});
+  }, []);
 
   const handleOpenAddModal = (mode: 'expense' | 'income' | 'saving' = 'expense') => {
     if (!canEdit) return;
@@ -78,6 +89,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
     [recurrings, selectedMonth, selectedYear]
   );
   const pendingRecurrings = activeRecurrings.filter((r) => !r.isPaidCurrentMonth);
+  const pendingRecurringsAmount = useMemo(
+    () => pendingRecurrings.reduce((sum, r) => sum + r.amount, 0),
+    [pendingRecurrings]
+  );
   const paidRecurringsCount = activeRecurrings.filter((r) => r.isPaidCurrentMonth).length;
   const totalRecurringsCount = activeRecurrings.length;
   const recentTransactions = transactions.slice(0, 4);
@@ -454,7 +469,10 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           )}
           <TouchableOpacity
             style={[styles.reportBtn, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}
-            onPress={() => setReportModalVisible(true)}
+            onPress={() => {
+              setReportMode(balanceMode);
+              setReportModalVisible(true);
+            }}
             activeOpacity={0.7}
           >
             <Ionicons name="share-social-outline" size={18} color={theme.primary} />
@@ -465,7 +483,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
         {/* ======================================================== */}
         {/* RADAR DE VENCIMENTOS INTELIGENTE                        */}
         {/* ======================================================== */}
-        {radarStats.hasUrgent && (
+        {radarEnabled && radarStats.hasUrgent && (
           <Card
             variant="elevated"
             style={[
@@ -532,7 +550,7 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           </Card>
         )}
 
-        {radarStats.isAllPaid && (
+        {radarEnabled && radarStats.isAllPaid && (
           <View style={[styles.allPaidBanner, { backgroundColor: '#10B98115', borderColor: '#10B98140' }]}>
             <Ionicons name="checkmark-circle" size={22} color="#10B981" />
             <View style={{ flex: 1, marginLeft: 10 }}>
@@ -613,8 +631,8 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
           allTransactions={allTransactions}
         />
 
-        {/* Recurrings to pay preview (fallback se não houver urgente) */}
-        {!radarStats.hasUrgent && pendingRecurrings.length > 0 && (
+        {/* Recurrings to pay preview (fallback se não houver urgente ou radar desativado) */}
+        {(!radarEnabled || !radarStats.hasUrgent) && pendingRecurrings.length > 0 && (
           <>
             <View style={styles.sectionHeader}>
               <View>
@@ -716,61 +734,165 @@ export const HomeScreen: React.FC<HomeScreenProps> = ({
       <ModalContainer
         visible={reportModalVisible}
         onClose={() => setReportModalVisible(false)}
-        title={`Resumo: ${getMonthLabel(selectedMonth, selectedYear)}`}
+        title={`Relatório: ${getMonthLabel(selectedMonth, selectedYear)}`}
       >
-        <Text style={{ fontSize: 13, color: theme.textMuted, marginBottom: 14 }}>
-          Compartilhe ou exporte o relatório financeiro consolidado desta competência:
+        {/* Seletor de Modo: Caixa Real vs Previsto */}
+        <View style={[styles.reportModeToggle, { backgroundColor: theme.surfaceVariant }]}>
+          <TouchableOpacity
+            style={[
+              styles.reportModeTab,
+              reportMode === 'realized' && { backgroundColor: theme.primary },
+            ]}
+            onPress={() => setReportMode('realized')}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.reportModeTabText,
+                { color: reportMode === 'realized' ? '#FFF' : theme.textMuted },
+              ]}
+            >
+              Caixa Real
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[
+              styles.reportModeTab,
+              reportMode === 'projected' && { backgroundColor: theme.primary },
+            ]}
+            onPress={() => setReportMode('projected')}
+            activeOpacity={0.8}
+          >
+            <Text
+              style={[
+                styles.reportModeTabText,
+                { color: reportMode === 'projected' ? '#FFF' : theme.textMuted },
+              ]}
+            >
+              Previsto / Projeção
+            </Text>
+          </TouchableOpacity>
+        </View>
+
+        <Text style={{ fontSize: 12, color: theme.textMuted, marginBottom: 12 }}>
+          {reportMode === 'realized'
+            ? '📊 Visão de Caixa Real: Apenas valores que já foram efetivamente pagos ou recebidos.'
+            : '📈 Visão Prevista / Competência: Inclui contas fixas pendentes e todas as previsões do mês.'}
         </Text>
 
-        <Card variant="flat" style={{ padding: 14, marginBottom: 16, backgroundColor: theme.surfaceVariant }}>
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text style={{ fontSize: 13, color: theme.text }}>🟢 Receitas Totais:</Text>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: theme.success }}>
-              {formatCurrency(monthlySummary.totalIncome)}
-            </Text>
-          </View>
+        {reportMode === 'realized' ? (
+          <Card variant="flat" style={{ padding: 14, marginBottom: 16, backgroundColor: theme.surfaceVariant }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 13, color: theme.text }}>🟢 Receitas em Caixa:</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.success }}>
+                {formatCurrency(monthlySummary.totalIncome)}
+              </Text>
+            </View>
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
-            <Text style={{ fontSize: 13, color: theme.text }}>🔴 Despesas Totais:</Text>
-            <Text style={{ fontSize: 14, fontWeight: '700', color: theme.danger }}>
-              {formatCurrency(monthlySummary.totalExpense)}
-            </Text>
-          </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 13, color: theme.text }}>🔴 Despesas Pagas:</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.danger }}>
+                {formatCurrency(monthlySummary.totalExpense)}
+              </Text>
+            </View>
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 8 }}>
-            <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>💰 Saldo do Mês:</Text>
-            <Text
-              style={{
-                fontSize: 15,
-                fontWeight: '800',
-                color: monthlySummary.balance >= 0 ? theme.success : theme.danger,
-              }}
-            >
-              {formatCurrency(monthlySummary.balance)}
-            </Text>
-          </View>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 8 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>💰 Saldo Real em Conta:</Text>
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontWeight: '800',
+                  color: monthlySummary.balance >= 0 ? theme.success : theme.danger,
+                }}
+              >
+                {formatCurrency(monthlySummary.balance)}
+              </Text>
+            </View>
 
-          <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
-            <Text style={{ fontSize: 12, color: theme.textMuted }}>📋 Contas Fixas:</Text>
-            <Text style={{ fontSize: 12, color: theme.textMuted }}>
-              {paidRecurringsCount} pagas • {pendingRecurrings.length} pendentes
-            </Text>
-          </View>
-        </Card>
+            {monthlySummary.totalSavedInMonth > 0 && (
+              <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+                <Text style={{ fontSize: 12, color: theme.primary }}>🛡️ Total Poupado:</Text>
+                <Text style={{ fontSize: 13, fontWeight: '700', color: theme.primary }}>
+                  {formatCurrency(monthlySummary.totalSavedInMonth)}
+                </Text>
+              </View>
+            )}
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={{ fontSize: 12, color: theme.textMuted }}>📋 Contas Fixas Pagas:</Text>
+              <Text style={{ fontSize: 12, color: theme.textMuted }}>
+                {paidRecurringsCount} pagas {pendingRecurrings.length > 0 ? `(${pendingRecurrings.length} pendentes)` : ''}
+              </Text>
+            </View>
+          </Card>
+        ) : (
+          <Card variant="flat" style={{ padding: 14, marginBottom: 16, backgroundColor: theme.surfaceVariant }}>
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 13, color: theme.text }}>🟢 Receitas Previstas:</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.success }}>
+                {formatCurrency(projectedIncome)}
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8 }}>
+              <Text style={{ fontSize: 13, color: theme.text }}>🔴 Despesas Previstas Totais:</Text>
+              <Text style={{ fontSize: 14, fontWeight: '700', color: theme.danger }}>
+                {formatCurrency(projectedExpense)}
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginBottom: 8, borderTopWidth: 1, borderTopColor: theme.border, paddingTop: 8 }}>
+              <Text style={{ fontSize: 13, fontWeight: '700', color: theme.text }}>💰 Saldo Previsto ao Fim do Mês:</Text>
+              <Text
+                style={{
+                  fontSize: 15,
+                  fontWeight: '800',
+                  color: projectedBalance >= 0 ? theme.success : theme.danger,
+                }}
+              >
+                {formatCurrency(projectedBalance)}
+              </Text>
+            </View>
+
+            <View style={{ flexDirection: 'row', justifyContent: 'space-between', marginTop: 4 }}>
+              <Text style={{ fontSize: 12, color: theme.textMuted }}>📋 Status Contas Fixas:</Text>
+              <Text style={{ fontSize: 12, color: theme.textMuted }}>
+                {paidRecurringsCount} quitadas • {pendingRecurrings.length} a pagar ({formatCurrency(pendingRecurringsAmount)})
+              </Text>
+            </View>
+          </Card>
+        )}
 
         <Button
-          title="Compartilhar no WhatsApp"
+          title={reportMode === 'realized' ? 'Compartilhar Relatório Real' : 'Compartilhar Relatório Previsto'}
           icon={<Ionicons name="logo-whatsapp" size={18} color="#FFF" />}
           onPress={async () => {
-            await ExportService.shareMonthlySummaryText({
-              monthLabel: getMonthLabel(selectedMonth, selectedYear),
-              totalIncome: monthlySummary.totalIncome,
-              totalExpense: monthlySummary.totalExpense,
-              balance: monthlySummary.balance,
-              topCategories: categorySpendings.map((c) => ({ category: c.category, total: c.total })),
-              recurringsPaidCount: paidRecurringsCount,
-              recurringsPendingCount: pendingRecurrings.length,
-            });
+            if (reportMode === 'realized') {
+              await ExportService.shareMonthlySummaryText({
+                mode: 'realized',
+                monthLabel: getMonthLabel(selectedMonth, selectedYear),
+                totalIncome: monthlySummary.totalIncome,
+                totalExpense: monthlySummary.totalExpense,
+                balance: monthlySummary.balance,
+                totalSavedInMonth: monthlySummary.totalSavedInMonth,
+                topCategories: categorySpendings.map((c) => ({ category: c.category, total: c.total })),
+                recurringsPaidCount: paidRecurringsCount,
+                recurringsPendingCount: pendingRecurrings.length,
+              });
+            } else {
+              await ExportService.shareMonthlySummaryText({
+                mode: 'projected',
+                monthLabel: getMonthLabel(selectedMonth, selectedYear),
+                totalIncome: projectedIncome,
+                totalExpense: projectedExpense,
+                balance: projectedBalance,
+                pendingRecurringsAmount,
+                topCategories: categorySpendings.map((c) => ({ category: c.category, total: c.total })),
+                recurringsPaidCount: paidRecurringsCount,
+                recurringsPendingCount: pendingRecurrings.length,
+              });
+            }
             setReportModalVisible(false);
           }}
           style={{ marginBottom: 10, backgroundColor: '#10B981' }}
@@ -1081,5 +1203,21 @@ const styles = StyleSheet.create({
     color: '#FFF',
     fontSize: 10,
     fontWeight: '800',
+  },
+  reportModeToggle: {
+    flexDirection: 'row',
+    borderRadius: 12,
+    padding: 4,
+    marginBottom: 12,
+  },
+  reportModeTab: {
+    flex: 1,
+    paddingVertical: 8,
+    alignItems: 'center',
+    borderRadius: 10,
+  },
+  reportModeTabText: {
+    fontSize: 13,
+    fontWeight: '700',
   },
 });

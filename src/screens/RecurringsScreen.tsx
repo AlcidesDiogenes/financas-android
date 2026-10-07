@@ -49,7 +49,7 @@ export const RecurringsScreen: React.FC = () => {
   const [groupMode, setGroupMode] = useState<GroupMode>('due');
   const [searchQuery, setSearchQuery] = useState('');
   const [collapsedPaid, setCollapsedPaid] = useState(false);
-  const [isReorderMode, setIsReorderMode] = useState(false);
+  const [isDraggingActive, setIsDraggingActive] = useState(false);
 
   // Modals state
   const [modalVisible, setModalVisible] = useState(false);
@@ -163,17 +163,17 @@ export const RecurringsScreen: React.FC = () => {
     );
   };
 
-  // Reorder handlers
-  const handleMoveItem = async (index: number, direction: 'up' | 'down', list: RecurringDebit[]) => {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1;
-    if (targetIndex < 0 || targetIndex >= list.length) return;
+  // Reorder by drag handler
+  const handleDragMove = async (id: string, slotsMoved: number) => {
+    const list = [...customList];
+    const curIdx = list.findIndex((r) => r.id === id);
+    if (curIdx === -1) return;
+    const targetIdx = Math.max(0, Math.min(list.length - 1, curIdx + slotsMoved));
+    if (targetIdx === curIdx) return;
 
-    const copy = [...list];
-    const temp = copy[index];
-    copy[index] = copy[targetIndex];
-    copy[targetIndex] = temp;
-
-    await reorderRecurrings(copy);
+    const [movedItem] = list.splice(curIdx, 1);
+    list.splice(targetIdx, 0, movedItem);
+    await reorderRecurrings(list);
   };
 
   // Helper renderer for a single Recurring item
@@ -198,14 +198,9 @@ export const RecurringsScreen: React.FC = () => {
         showVigencia={filterVigencia === 'all'}
         selectedMonth={selectedMonth}
         selectedYear={selectedYear}
-        isReorderMode={isReorderMode}
-        onMoveUp={() => handleMoveItem(index, 'up', list)}
-        onMoveDown={() => handleMoveItem(index, 'down', list)}
-        onLongPress={() => {
-          if (canEdit) {
-            setIsReorderMode((prev) => !prev);
-          }
-        }}
+        onDragStart={() => setIsDraggingActive(true)}
+        onDragMove={(id, slots) => handleDragMove(id, slots)}
+        onDragEnd={() => setIsDraggingActive(false)}
       />
     );
   };
@@ -339,6 +334,7 @@ export const RecurringsScreen: React.FC = () => {
       <ScrollView
         contentContainerStyle={styles.scrollContent}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={!isDraggingActive}
       >
         {/* Recurrings Summary Card */}
         <Card variant="elevated" style={styles.summaryCard}>
@@ -534,7 +530,6 @@ export const RecurringsScreen: React.FC = () => {
               ]}
               onPress={() => {
                 setGroupMode('due');
-                setIsReorderMode(false);
               }}
             >
               <Ionicons
@@ -558,7 +553,6 @@ export const RecurringsScreen: React.FC = () => {
               ]}
               onPress={() => {
                 setGroupMode('person');
-                setIsReorderMode(false);
               }}
             >
               <Ionicons
@@ -582,7 +576,6 @@ export const RecurringsScreen: React.FC = () => {
               ]}
               onPress={() => {
                 setGroupMode('category');
-                setIsReorderMode(false);
               }}
             >
               <Ionicons
@@ -606,7 +599,6 @@ export const RecurringsScreen: React.FC = () => {
               ]}
               onPress={() => {
                 setGroupMode('custom');
-                setIsReorderMode(true);
               }}
             >
               <Ionicons
@@ -616,7 +608,7 @@ export const RecurringsScreen: React.FC = () => {
                 style={{ marginRight: 5 }}
               />
               <Text style={[styles.groupModeChipText, { color: groupMode === 'custom' ? '#FFF' : theme.text }]}>
-                Ordem Livre
+                Personalizada
               </Text>
             </TouchableOpacity>
           </ScrollView>
@@ -665,19 +657,13 @@ export const RecurringsScreen: React.FC = () => {
           </TouchableOpacity>
         </View>
 
-        {/* Reorder Mode Banner */}
-        {isReorderMode && (
-          <View style={[styles.reorderBanner, { backgroundColor: '#3B82F620', borderColor: '#3B82F6' }]}>
-            <Ionicons name="information-circle" size={18} color="#3B82F6" style={{ marginRight: 8 }} />
+        {/* Reorder Helper Tip */}
+        {groupMode === 'custom' && (
+          <View style={[styles.reorderBanner, { backgroundColor: '#3B82F615', borderColor: '#3B82F640' }]}>
+            <Ionicons name="hand-left-outline" size={17} color="#3B82F6" style={{ marginRight: 8 }} />
             <Text style={[styles.reorderBannerText, { color: '#3B82F6' }]}>
-              Modo de reordenação ativo. Use as setas para ajustar a sequência das contas.
+              Segure qualquer conta por 4 segundos para arrastar e reorganizar.
             </Text>
-            <TouchableOpacity
-              style={styles.reorderCloseBtn}
-              onPress={() => setIsReorderMode(false)}
-            >
-              <Text style={styles.reorderCloseBtnText}>Concluir</Text>
-            </TouchableOpacity>
           </View>
         )}
 
@@ -937,7 +923,7 @@ export const RecurringsScreen: React.FC = () => {
       </ScrollView>
 
       {/* FAB: Novo Item Recorrente */}
-      {canEdit && !isReorderMode && (
+      {canEdit && !isDraggingActive && (
         <View style={styles.fabWrap}>
           <Button
             title="Novo Item Recorrente"

@@ -1,4 +1,4 @@
-import React, { useRef, useMemo } from 'react';
+import React, { useRef, useMemo, useState } from 'react';
 import {
   View,
   Text,
@@ -27,10 +27,9 @@ interface RecurringItemProps {
   showVigencia?: boolean;
   selectedMonth?: number;
   selectedYear?: number;
-  isReorderMode?: boolean;
-  onMoveUp?: () => void;
-  onMoveDown?: () => void;
-  onLongPress?: () => void;
+  onDragStart?: (id: string) => void;
+  onDragMove?: (id: string, slotsMoved: number) => void;
+  onDragEnd?: () => void;
 }
 
 export const RecurringItem: React.FC<RecurringItemProps> = ({
@@ -43,18 +42,22 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
   showVigencia = true,
   selectedMonth,
   selectedYear,
-  isReorderMode = false,
-  onMoveUp,
-  onMoveDown,
-  onLongPress,
+  onDragStart,
+  onDragMove,
+  onDragEnd,
 }) => {
   const { theme } = useTheme();
   const { swipePayDirection } = useSwipeAction();
   const meta = getCategoryMeta(recurring.category);
 
   const translateX = useRef(new Animated.Value(0)).current;
+  const translateY = useRef(new Animated.Value(0)).current;
   const currentDx = useRef(0);
-  const longPressTimer = useRef<any>(null);
+
+  const holdTimer = useRef<any>(null);
+  const startPos = useRef({ x: 0, y: 0 });
+  const isDraggingRef = useRef(false);
+  const [isDragging, setIsDragging] = useState(false);
 
   const urgencyInfo = useMemo(() => {
     if (recurring.isPaused) {
@@ -213,31 +216,14 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
 
   const panResponder = useMemo(() => {
     return PanResponder.create({
-      onStartShouldSetPanResponder: () => {
-        if (!canEdit || isReorderMode) return false;
-        if (onLongPress) {
-          if (longPressTimer.current) clearTimeout(longPressTimer.current);
-          longPressTimer.current = setTimeout(() => {
-            try {
-              Vibration.vibrate(50);
-            } catch {}
-            onLongPress();
-          }, 600);
-        }
-        return false;
-      },
+      onStartShouldSetPanResponder: () => false,
       onMoveShouldSetPanResponder: (_, gestureState) => {
-        if (!canEdit || isReorderMode) return false;
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-        }
+        if (!canEdit || isDraggingRef.current) return false;
         // Só captura se o movimento horizontal for predominante e perceptível
-        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.5;
-        const hasMoved = Math.abs(gestureState.dx) > 10;
+        const isHorizontal = Math.abs(gestureState.dx) > Math.abs(gestureState.dy) * 1.8;
+        const hasMoved = Math.abs(gestureState.dx) > 12;
         if (!isHorizontal || !hasMoved) return false;
 
-        // Se estiver tentando arrastar na direção de exclusão mas onDelete não existir (ex: na HomeScreen)
         if (gestureState.dx > 0) {
           const isDeleteSide = swipePayDirection === 'left';
           if (isDeleteSide && !onDelete) return false;
@@ -249,28 +235,20 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         return true;
       },
       onPanResponderMove: (_, gestureState) => {
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-        }
+        if (isDraggingRef.current) return;
         let dx = gestureState.dx;
-        // Se arrastar para a direção de exclusão e não tiver onDelete, não deixa passar de 0
         if (swipePayDirection === 'right' && dx < 0 && !onDelete) {
           dx = 0;
         } else if (swipePayDirection === 'left' && dx > 0 && !onDelete) {
           dx = 0;
         }
-        // Limita o arrasto máximo com amortecimento
         const maxDrag = 130;
         const clampedDx = Math.max(-maxDrag, Math.min(maxDrag, dx));
         translateX.setValue(clampedDx);
         currentDx.current = clampedDx;
       },
       onPanResponderRelease: () => {
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-        }
+        if (isDraggingRef.current) return;
         const threshold = 65;
         const dx = currentDx.current;
 
@@ -280,7 +258,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
           swipePayDirection === 'right' ? dx <= -threshold : dx >= threshold;
 
         if (isPaySide) {
-          // Dispara marcar como pago/recebido
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
@@ -288,7 +265,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
           }).start();
           onTogglePaid(recurring.id);
         } else if (isDeleteSide && onDelete) {
-          // Dispara confirmação de exclusão
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
@@ -307,7 +283,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             ]
           );
         } else {
-          // Não atingiu o limite: volta para 0 suavemente
           Animated.spring(translateX, {
             toValue: 0,
             useNativeDriver: true,
@@ -317,10 +292,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = 0;
       },
       onPanResponderTerminate: () => {
-        if (longPressTimer.current) {
-          clearTimeout(longPressTimer.current);
-          longPressTimer.current = null;
-        }
         Animated.spring(translateX, {
           toValue: 0,
           useNativeDriver: true,
@@ -329,7 +300,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         currentDx.current = 0;
       },
     });
-  }, [canEdit, isReorderMode, onDelete, onLongPress, swipePayDirection, recurring, onTogglePaid, translateX]);
+  }, [canEdit, onDelete, swipePayDirection, recurring, onTogglePaid, translateX]);
 
   // Interpolações de opacidade para os fundos de ação
   const leftOpacity = translateX.interpolate({
@@ -353,7 +324,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
     <View style={styles.swipeWrapper}>
       {/* Camada Traseira (Background de Ação Revelado ao Deslizar) */}
       <View style={StyleSheet.absoluteFill}>
-        {/* Lado Esquerdo (acionado quando arrasta para a DIREITA) */}
+        {/* Lado Esquerdo */}
         <Animated.View
           style={[
             styles.actionBackground,
@@ -378,7 +349,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
           <Text style={styles.actionText}>{isLeftPay ? payLabel : 'Excluir'}</Text>
         </Animated.View>
 
-        {/* Lado Direito (acionado quando arrasta para a ESQUERDA) */}
+        {/* Lado Direito */}
         <Animated.View
           style={[
             styles.actionBackground,
@@ -404,16 +375,88 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
         </Animated.View>
       </View>
 
-      {/* Card da Frente Deslizável */}
+      {/* Card da Frente Deslizável & Arrastável por 4 segundos */}
       <Animated.View
         style={[
           styles.container,
           {
             backgroundColor: theme.card,
-            borderColor: theme.border,
-            transform: [{ translateX }],
+            borderColor: isDragging ? theme.primary : theme.border,
+            borderWidth: isDragging ? 2 : 1,
+            transform: [{ translateX }, { translateY }, { scale: isDragging ? 1.03 : 1 }],
+            zIndex: isDragging ? 9999 : 1,
+            elevation: isDragging ? 10 : 0,
+            shadowColor: '#000',
+            shadowOffset: { width: 0, height: isDragging ? 6 : 0 },
+            shadowOpacity: isDragging ? 0.35 : 0,
+            shadowRadius: isDragging ? 8 : 0,
           },
         ]}
+        onTouchStart={(e) => {
+          if (!canEdit || !onDragStart) return;
+          startPos.current = { x: e.nativeEvent.pageX, y: e.nativeEvent.pageY };
+          if (holdTimer.current) clearTimeout(holdTimer.current);
+
+          // Segurar por 4 segundos exatos (4000ms)
+          holdTimer.current = setTimeout(() => {
+            isDraggingRef.current = true;
+            setIsDragging(true);
+            try {
+              Vibration.vibrate([0, 120, 60, 120]);
+            } catch {}
+            onDragStart(recurring.id);
+          }, 4000);
+        }}
+        onTouchMove={(e) => {
+          if (!isDraggingRef.current) {
+            // Se o dedo se mover mais de 8px antes de completar os 4 segundos, cancela o timer
+            // Isso evita completamente que o modo ative sozinho ao rolar a tela ou ao dar toques rápidos!
+            const dx = Math.abs(e.nativeEvent.pageX - startPos.current.x);
+            const dy = Math.abs(e.nativeEvent.pageY - startPos.current.y);
+            if (dx > 8 || dy > 8) {
+              if (holdTimer.current) {
+                clearTimeout(holdTimer.current);
+                holdTimer.current = null;
+              }
+            }
+          } else {
+            // Em modo arrasto ativo após 4 segundos:
+            const dy = e.nativeEvent.pageY - startPos.current.y;
+            translateY.setValue(dy);
+          }
+        }}
+        onTouchEnd={(e) => {
+          if (holdTimer.current) {
+            clearTimeout(holdTimer.current);
+            holdTimer.current = null;
+          }
+          if (isDraggingRef.current) {
+            isDraggingRef.current = false;
+            setIsDragging(false);
+            const dy = e.nativeEvent.pageY - startPos.current.y;
+            const slotsMoved = Math.round(dy / 68);
+            if (slotsMoved !== 0 && onDragMove) {
+              onDragMove(recurring.id, slotsMoved);
+              try {
+                Vibration.vibrate(50);
+              } catch {}
+            }
+            Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
+            if (onDragEnd) onDragEnd();
+          }
+        }}
+        onTouchCancel={() => {
+          if (holdTimer.current) {
+            clearTimeout(holdTimer.current);
+            holdTimer.current = null;
+          }
+          if (isDraggingRef.current) {
+            isDraggingRef.current = false;
+            setIsDragging(false);
+            Animated.spring(translateY, { toValue: 0, useNativeDriver: true }).start();
+            if (onDragEnd) onDragEnd();
+          }
+        }}
         {...panResponder.panHandlers}
       >
         <View style={[styles.iconContainer, { backgroundColor: `${meta.color}20` }]}>
@@ -425,7 +468,12 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             <Text style={[styles.title, { color: theme.text }]} numberOfLines={1}>
               {recurring.title}
             </Text>
-            {recurring.isPaused ? (
+            {isDragging ? (
+              <View style={[styles.urgencyTag, { backgroundColor: `${theme.primary}25`, borderColor: theme.primary }]}>
+                <Ionicons name="move" size={10} color={theme.primary} style={{ marginRight: 3 }} />
+                <Text style={[styles.urgencyTagText, { color: theme.primary }]}>Arrastando</Text>
+              </View>
+            ) : recurring.isPaused ? (
               <View style={[styles.urgencyTag, { backgroundColor: '#6B728020', borderColor: '#6B728040' }]}>
                 <Ionicons name="pause" size={10} color="#6B7280" style={{ marginRight: 3 }} />
                 <Text style={[styles.urgencyTagText, { color: '#6B7280' }]}>Pausada</Text>
@@ -448,23 +496,23 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             <Text style={[styles.subText, { color: theme.textMuted }]}>
               {recurring.category}
             </Text>
-            {recurring.assignedTo ? (
+            {recurring.assignedTo && (
               <>
                 <Text style={[styles.dot, { color: theme.textMuted }]}>•</Text>
-                <View style={[styles.assignedChip, { backgroundColor: `${theme.primary}12` }]}>
-                  <Ionicons name="person" size={10} color={theme.primary} style={{ marginRight: 3 }} />
+                <View style={[styles.assignedChip, { backgroundColor: `${theme.primary}15` }]}>
+                  <Ionicons name="person-outline" size={10} color={theme.primary} style={{ marginRight: 3 }} />
                   <Text style={[styles.assignedBadge, { color: theme.primary }]}>
                     {recurring.assignedTo}
                   </Text>
                 </View>
               </>
-            ) : null}
+            )}
           </View>
 
           {vigenciaLabel && (
             <View style={styles.vigenciaRow}>
-              <Ionicons name="time-outline" size={12} color={theme.textMuted} style={{ marginRight: 3 }} />
-              <Text style={[styles.vigenciaText, { color: theme.textMuted }]} numberOfLines={1}>
+              <Ionicons name="calendar-outline" size={11} color={theme.textMuted} style={{ marginRight: 4 }} />
+              <Text style={[styles.vigenciaText, { color: theme.textMuted }]}>
                 {vigenciaLabel}
               </Text>
             </View>
@@ -476,7 +524,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             disabled={!canEdit || !onEditAmount}
             onPress={() => onEditAmount && onEditAmount(recurring.id, recurring.amount, recurring.title)}
             style={styles.amountTouchable}
-            hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
+            activeOpacity={canEdit && onEditAmount ? 0.7 : 1}
           >
             <Text
               style={[
@@ -504,7 +552,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
               />
             </TouchableOpacity>
 
-            {canEdit && onEditFull && !isReorderMode && (
+            {canEdit && onEditFull && (
               <TouchableOpacity
                 onPress={() => onEditFull(recurring)}
                 hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
@@ -512,27 +560,6 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
               >
                 <Ionicons name="create-outline" size={17} color={theme.textMuted} />
               </TouchableOpacity>
-            )}
-
-            {isReorderMode && (
-              <View style={styles.reorderCol}>
-                <TouchableOpacity
-                  onPress={onMoveUp}
-                  disabled={!onMoveUp}
-                  style={[styles.reorderBtn, !onMoveUp && { opacity: 0.25 }]}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Ionicons name="chevron-up" size={17} color={theme.primary} />
-                </TouchableOpacity>
-                <TouchableOpacity
-                  onPress={onMoveDown}
-                  disabled={!onMoveDown}
-                  style={[styles.reorderBtn, !onMoveDown && { opacity: 0.25 }]}
-                  hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
-                >
-                  <Ionicons name="chevron-down" size={17} color={theme.primary} />
-                </TouchableOpacity>
-              </View>
             )}
           </View>
         </View>
@@ -543,9 +570,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
 
 const styles = StyleSheet.create({
   swipeWrapper: {
-    borderRadius: 14,
     marginBottom: 8,
-    overflow: 'hidden',
     position: 'relative',
   },
   actionBackground: {
@@ -577,7 +602,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     padding: 12,
     borderRadius: 14,
-    borderWidth: 1,
   },
   iconContainer: {
     width: 42,
@@ -670,16 +694,5 @@ const styles = StyleSheet.create({
     paddingHorizontal: 5,
     paddingVertical: 1,
     borderRadius: 5,
-  },
-  reorderCol: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginLeft: 6,
-  },
-  reorderBtn: {
-    padding: 4,
-    borderRadius: 6,
-    backgroundColor: '#8B5CF618',
   },
 });

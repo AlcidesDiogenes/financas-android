@@ -59,6 +59,20 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [showAuthModal, setShowAuthModal] = useState(false);
   const [showTutorialModal, setShowTutorialModal] = useState(false);
   const [showWhatsNewManual, setShowWhatsNewManual] = useState(false);
+  const [radarEnabled, setRadarEnabled] = useState(false);
+
+  useEffect(() => {
+    AsyncStorage.getItem('@financas:radar_enabled')
+      .then((val) => {
+        setRadarEnabled(val === 'true');
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleToggleRadar = async (val: boolean) => {
+    setRadarEnabled(val);
+    await AsyncStorage.setItem('@financas:radar_enabled', val ? 'true' : 'false');
+  };
 
   // Modal Customizado de Atualizações OTA
   const [showUpdateModal, setShowUpdateModal] = useState(false);
@@ -563,6 +577,30 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                 toggleBiometrics();
               }}
               thumbColor={isBiometricsEnabled ? theme.primary : '#ccc'}
+            />
+          </View>
+
+          <View style={[styles.cellSeparator, { backgroundColor: theme.border }]} />
+
+          {/* Radar de Vencimentos */}
+          <View style={styles.cell}>
+            <View style={[styles.cellIconWrap, { backgroundColor: '#F59E0B20' }]}>
+              <Ionicons name="flash-outline" size={20} color="#F59E0B" />
+            </View>
+            <View style={styles.cellTextWrap}>
+              <Text style={[styles.cellTitle, { color: theme.text }]}>
+                Radar de Vencimentos na Home
+              </Text>
+              <Text style={[styles.cellSubtitle, { color: theme.textMuted }]}>
+                {radarEnabled
+                  ? 'Exibir alertas de contas atrasadas e do dia na Home'
+                  : 'Desativado (oculto na tela inicial)'}
+              </Text>
+            </View>
+            <Switch
+              value={radarEnabled}
+              onValueChange={handleToggleRadar}
+              thumbColor={radarEnabled ? theme.primary : '#ccc'}
             />
           </View>
 

@@ -50,38 +50,71 @@ export class ExportService {
 
   static async shareMonthlySummaryText(params: {
     monthLabel: string;
+    mode?: 'realized' | 'projected';
     totalIncome: number;
     totalExpense: number;
     balance: number;
     topCategories: { category: string; total: number }[];
     recurringsPaidCount: number;
     recurringsPendingCount: number;
+    pendingRecurringsAmount?: number;
+    totalSavedInMonth?: number;
   }): Promise<boolean> {
     try {
       const {
         monthLabel,
+        mode = 'realized',
         totalIncome,
         totalExpense,
         balance,
         topCategories,
         recurringsPaidCount,
         recurringsPendingCount,
+        pendingRecurringsAmount = 0,
+        totalSavedInMonth = 0,
       } = params;
 
-      const lines = [
-        `📊 *Resumo Financeiro - ${monthLabel}*`,
-        `━━━━━━━━━━━━━━━━━━━━`,
-        `🟢 *Receitas:* ${formatCurrency(totalIncome)}`,
-        `🔴 *Despesas:* ${formatCurrency(totalExpense)}`,
-        `💰 *Saldo Líquido:* ${formatCurrency(balance)} ${balance >= 0 ? '✅' : '⚠️'}`,
-        ``,
-        `📋 *Contas Fixas Recorrentes:*`,
-        `• ${recurringsPaidCount} pagas`,
-        `• ${recurringsPendingCount} pendentes`,
-      ];
+      let lines: string[] = [];
+
+      if (mode === 'projected') {
+        lines = [
+          `📈 *Relatório Financeiro Previsto - ${monthLabel}*`,
+          `_(Visão Competência com Contas Fixas e Rendas)_`,
+          `━━━━━━━━━━━━━━━━━━━━`,
+          `🟢 *Receitas Previstas Totais:* ${formatCurrency(totalIncome)}`,
+          `🔴 *Despesas Previstas Totais:* ${formatCurrency(totalExpense)}`,
+          `💰 *Saldo Previsto ao Fim do Mês:* ${formatCurrency(balance)} ${balance >= 0 ? '✅' : '⚠️'}`,
+          ``,
+          `📋 *Status das Contas Fixas do Mês:*`,
+          `• ${recurringsPaidCount} já quitadas`,
+          `• ${recurringsPendingCount} pendentes a pagar (${formatCurrency(pendingRecurringsAmount)})`,
+        ];
+      } else {
+        lines = [
+          `📊 *Relatório Financeiro Realizado - ${monthLabel}*`,
+          `_(Caixa Real: Valores Efetivamente Pagos/Recebidos)_`,
+          `━━━━━━━━━━━━━━━━━━━━`,
+          `🟢 *Receitas em Caixa:* ${formatCurrency(totalIncome)}`,
+          `🔴 *Despesas Pagas:* ${formatCurrency(totalExpense)}`,
+          `💰 *Saldo Real em Conta:* ${formatCurrency(balance)} ${balance >= 0 ? '✅' : '⚠️'}`,
+        ];
+
+        if (totalSavedInMonth > 0) {
+          lines.push(`🛡️ *Total Poupado:* ${formatCurrency(totalSavedInMonth)}`);
+        }
+
+        lines.push(
+          ``,
+          `📋 *Contas Fixas do Mês:*`,
+          `• ${recurringsPaidCount} pagas no mês`
+        );
+        if (recurringsPendingCount > 0) {
+          lines.push(`• ${recurringsPendingCount} ainda pendentes`);
+        }
+      }
 
       if (topCategories.length > 0) {
-        lines.push(``, `🏷️ *Principais Gastos por Categoria:*`);
+        lines.push(``, `🏷️ *Principais Categorias de Gastos:*`);
         topCategories.slice(0, 4).forEach((c) => {
           lines.push(`• ${c.category}: ${formatCurrency(c.total)}`);
         });
