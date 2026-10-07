@@ -1,63 +1,122 @@
 # 💰 Finanças App
 
-Aplicativo móvel completo de controle financeiro pessoal e colaborativo, desenvolvido em **React Native**, **Expo**, **TypeScript** e **Supabase** seguindo princípios de **Clean Architecture** e **SOLID**.
+Aplicativo móvel completo de gestão financeira pessoal e colaborativa, desenvolvido em **React Native**, **Expo (SDK 57)**, **TypeScript** e **Supabase (PostgreSQL com Realtime)**, baseado em **Clean Architecture**, **SOLID** e arquitetura **Offline-First**.
 
 ---
 
 ## 🚀 Funcionalidades Principais
 
-* **📊 Dashboard Financeiro Completo:**
-  * Balanço líquido em tempo real (Receitas, Despesas, Saldo Atual).
-  * Projeção financeira até o fim do mês considerando débitos pendentes.
-  * Gráfico interativo com distribuição de despesas por categoria.
+### 1. 📊 Dashboard Financeiro & Projeção de Caixa
+* **Balanço Líquido em Tempo Real:** Receitas, despesas, saldo atual consolidado e sobra livre.
+* **Saldo Real vs. Saldo Previsto:** Alternância instantânea entre o que já foi efetivamente liquidado e a projeção financeira até o fim do mês com contas pendentes.
+* **Distribuição de Gastos:** Gráficos visuais por categorias financeiras.
+* **Seletor de Competência:** Navegação mensal e anual simplificada.
 
-* **🔒 Segurança & Privacidade:**
-  * **Biometria Nativa:** Bloqueio e desbloqueio por impressão digital (ultrassônica) ou reconhecimento facial.
-  * **Modo Privacidade:** Botão de olho para ocultar valores sensíveis (`R$ •••••`).
+### 2. 👥 Múltiplos Espaços de Trabalho (Solo & Compartilhado)
+* **Espaço Solo:** Totalmente privado, individual e criptografado no armazenamento.
+* **Espaços Compartilhados (Família, Casal ou Projetos):**
+  * Criação com geração automática de código de convite de 6 caracteres.
+  * **Aprovação Prévia Obrigatória:** Qualquer pessoa que insere o código fica em estado *pendente* até a aprovação formal do proprietário.
+  * **Controle Granular de Permissões:** O dono define na aprovação se o membro terá permissão de **Editor** (*Pode lançar e editar*) ou **Visualizador** (*Apenas ver*).
+  * **Isolamento Multi-Tenant:** Todas as transações, contas e metas são isoladas estritamente por `workspace_id`.
 
-* **👥 Modo Solo vs. Modo Compartilhado (Colaborativo):**
-  * **Espaço Solo:** Totalmente privado e individual.
-  * **Espaço Compartilhado:** Com código de convite e controle granular de permissões (Visualizador vs. Editor).
+### 3. 🔄 Contas Recorrentes, Assinaturas & Proventos
+* **Gestão de Despesas e Rendas Fixas:** Aluguel, internet, streaming, salários, dividendos, etc.
+* **Ordenação Cronológica Natural:** Listagem limpa e estável ordenada automaticamente pelo dia do vencimento/recebimento (`dueDay`).
+* **Ações por Deslize (Swipe):**
+  * Deslize lateral suave para marcar como Pago/Recebido ou Desmarcar.
+  * Deslize reverso para exclusão com confirmação.
+* **Escopo Temporal de Exclusão (Proteção de Histórico):**
+  * Ao excluir uma recorrência, escolha entre:
+    1. **Apenas deste mês:** Adiciona o mês aos `excludedMonths` sem apagar os outros meses.
+    2. **Deste mês em diante:** Define `endDate` retroativo, preservando o histórico passado.
+    3. **Excluir tudo:** Remove permanentemente a recorrência de todas as competências.
+* **Valores Variáveis por Competência (`monthlyOverrides`):** Altere o valor de uma conta de consumo (ex: energia) no mês vigente sem afetar o valor cadastrado nos meses anteriores.
+* **Vigência Programada:** Suporte a datas de início (`startDate`) e término (`endDate`).
 
-* **🔄 Débitos Recorrentes & Assinaturas:**
-  * Gestão de contas fixas (Netflix, Aluguel, Internet, etc.) com dia de vencimento.
-  * Alternador de status **Pago / Pendente** no mês vigente.
+### 4. 🎯 Planejamento Financeiro: Tetos & Metas
+* **Orçamentos Mensais:** Tetos de gastos por categoria com barras visuais de progresso (*No Limite*, *Atenção*, *Estourado*).
+* **Metas Financeiras (Cofres):** Objetivos de economia com valor alvo, data limite, cálculo de economia mensal recomendada e botões de aporte e resgate rápidos com geração opcional de transação.
 
-* **🎯 Planejamento de Gastos (Tetos & Metas):**
-  * **Orçamentos:** Tetos mensais por categoria com alertas visuais (*No Limite*, *Atenção*, *Estourado*).
-  * **Metas Financeiras:** Objetivos de economia com barra de progresso, prazos e botão de aporte rápido.
+### 5. 🔒 Segurança, Biometria & Privacidade
+* **Biometria Nativa:** Bloqueio e desbloqueio por impressão digital (ultrassônica/óptica) ou reconhecimento facial via `expo-local-authentication`.
+* **Modo Privacidade:** Botão de olho no cabeçalho para ofuscar todos os valores monetários sensíveis (`R$ •••••`).
+* **Bloqueio por Inatividade:** Proteção de sessão automática ao fechar ou alternar de app.
 
-* **☁️ Sincronização em Nuvem em Tempo Real (Supabase):**
-  * Sincronização automática em segundo plano via PostgreSQL com Realtime.
-  * Offline-First: funciona sem conexão e sincroniza automaticamente ao reconectar.
+### 6. ☁️ Sincronização em Nuvem em Tempo Real (Supabase)
+* **Arquitetura Offline-First:** Toda operação é gravada imediatamente no `AsyncStorage` local (UI com latência zero) e sincronizada em segundo plano com o Supabase.
+* **Recuperação de Falhas:** Fila de sincronização e reconciliação com carimbo de hora.
 
-* **📄 Exportação de Extratos:**
-  * Geração e compartilhamento nativo de planilhas formatadas em **CSV** para WhatsApp, e-mail e Google Drive.
+### 7. 📄 Exportação & Compartilhamento
+* Geração nativa de extratos em planilhas **CSV** formatadas, compatíveis com Excel e Google Sheets, com compartilhamento direto via WhatsApp, e-mail ou nuvem.
 
-* **🌗 Tema Claro e Escuro (Dark Mode):**
-  * Suporte nativo a temas com alto contraste.
+### 8. 🎨 Design System, Temas & Novidades
+* **Dark Mode & Light Mode:** Suporte completo com contraste calibrado.
+* **Onboarding Interativo:** Tutorial guiado no primeiro acesso de novos usuários.
+* **Modal de Novidades ("What's New"):** Exibição automática do changelog detalhado quando o app é atualizado para uma nova versão.
 
 ---
 
-## 🛠️ Tecnologias Utilizadas
+## 🛠️ Tecnologias e Bibliotecas
 
-* **Framework:** [React Native](https://reactnative.dev/) com [Expo](https://expo.dev/) (SDK 57)
-* **Linguagem:** [TypeScript](https://www.typescriptlang.org/) (Strict Mode)
-* **Design & Ícones:** `@expo/vector-icons` (Ionicons) + Design System Customizado
-* **Segurança:** `expo-local-authentication`
-* **Persistência Local:** `@react-native-async-storage/async-storage`
-* **Nuvem & Backend:** [Supabase](https://supabase.com/) (`@supabase/supabase-js`)
-* **Compartilhamento & Arquivos:** `expo-sharing` e `expo-file-system`
+| Categoria | Tecnologia | Versão |
+|---|---|---|
+| **Core** | React Native | 0.86.3 |
+| **Plataforma** | Expo | SDK 57.0.26 |
+| **Linguagem** | TypeScript | 6.0.3 (Strict Mode) |
+| **Backend & Nuvem** | Supabase | `@supabase/supabase-js` 2.117.2 |
+| **Persistência Local** | AsyncStorage | `@react-native-async-storage/async-storage` 2.2.0 |
+| **Biometria** | Local Authentication | `expo-local-authentication` 57.0.3 |
+| **Compartilhamento** | Expo Sharing & FileSystem | `expo-sharing` / `expo-file-system` |
+| **Ícones** | Ionicons | `@expo/vector-icons` 15.0.2 |
+
+---
+
+## 🏗️ Padrões de Projeto & Arquitetura
+
+O projeto adota uma arquitetura em camadas focada em modularidade e manutenibilidade:
+
+```
+src/
+├── core/                  # Elementos fundamentais do app
+│   ├── components/        # Componentes reutilizáveis (Button, Card, Input, Badge, Modals)
+│   ├── theme/             # Contextos de Tema, Privacidade e Badges
+│   └── utils/             # Utilitários de moeda, data, categorias e versão
+├── modules/               # Módulos de domínio de negócio (Clean Architecture)
+│   ├── recurrings/        # Componentes, tipos e lógica de contas fixas
+│   ├── workspaces/        # Repositórios e contexto de espaços compartilhados
+│   └── FinanceContext.tsx # Orquestrador central de finanças (Estado Global)
+├── navigation/            # Navegação centralizada
+│   └── MainNavigator.tsx  # Navegação por abas com badges inteligentes
+├── screens/               # Telas do aplicativo
+│   ├── HomeScreen.tsx
+│   ├── TransactionsScreen.tsx
+│   ├── RecurringsScreen.tsx
+│   ├── PlanningScreen.tsx
+│   ├── SettingsScreen.tsx
+│   ├── WorkspacesScreen.tsx
+│   ├── AuthScreen.tsx
+│   └── OnboardingScreen.tsx
+└── services/              # Serviços de infraestrutura
+    ├── auth/              # Contexto e gerenciamento de autenticação
+    ├── security/          # Biometria e segurança nativa
+    └── supabase/          # Cliente Supabase e CloudSyncService
+```
+
+### Princípios Chave:
+1. **Single Source of Truth:** `FinanceContext` centraliza os estados de transações, recorrências, orçamentos e metas em memória.
+2. **Offline-First:** Leitura e escrita no disco antes da nuvem. O usuário nunca espera requisições HTTP para ver uma alteração refletida na tela.
+3. **Isolamento de Negócio:** Cada entidade carrega seu `workspaceId`. Espaços Solo usam prefixos únicos locais e espaços compartilhados utilizam UUIDs persistidos na nuvem.
 
 ---
 
 ## 📱 Como Rodar o Projeto
 
 ### Pré-requisitos
-* Node.js v18+ instalado.
-* Aplicativo **Expo Go** instalado no celular Android/iOS (disponível na Google Play Store e App Store).
+* **Node.js** v18+ instalado.
+* Celular físico com o app **Expo Go** instalado (Android ou iOS) ou emulador Android configurado.
 
-### Passos:
+### Passo a Passo:
 1. Clone o repositório:
    ```bash
    git clone https://github.com/AlcidesDiogenes/financas-android.git
@@ -69,20 +128,50 @@ Aplicativo móvel completo de controle financeiro pessoal e colaborativo, desenv
    npm install
    ```
 
-3. Inicie o servidor Expo:
+3. Inicie o servidor de desenvolvimento:
    ```bash
    npm start
    ```
 
-4. Abra o app **Expo Go** no celular e leia o QR Code exibido no terminal.
+4. Abra o **Expo Go** no celular e escaneie o QR Code exibido no terminal.
 
 ---
 
-## 📦 Gerar APK Instalável (EAS Build)
+## ☁️ Configuração do Banco de Dados (Supabase)
 
-Para gerar o arquivo `.apk` de produção sem precisar de ambiente local pesado:
+O aplicativo pode operar offline ou sincronizado com o Supabase.
+
+1. Acesse seu painel em [supabase.com](https://supabase.com/) e crie um novo projeto PostgreSQL.
+2. No menu lateral, acesse **SQL Editor** ➔ **New Query**.
+3. Copie todo o conteúdo do arquivo [`supabase_schema.sql`](file:///C:/Users/alcidesdiogenes/Desktop/Projetos/Financas%20android/supabase_schema.sql) deste repositório e cole no editor.
+4. Clique em **Run** para criar todas as tabelas, índices e triggers de auditoria:
+   * `workspaces` e `workspace_members`
+   * `workspace_join_requests` (aprovação obrigatória)
+   * `transactions`
+   * `recurrings` e `recurring_month_records`
+   * `budgets` e `goals`
+5. No app, em **Ajustes ➔ Nuvem & Supabase**, você pode inserir a URL e a Anon Key do seu projeto, ou utilizar as credenciais padrão configuradas em `src/services/supabase/supabaseClient.ts`.
+
+---
+
+## 📦 Build e Geração de APK
+
+Para gerar um APK instalável no Android usando o serviço na nuvem da Expo (EAS Build):
 
 ```bash
-npx eas login
-npx eas build -p android --profile preview
+# 1. Instalar EAS CLI se ainda não tiver
+npm install -g eas-cli
+
+# 2. Fazer login na conta Expo
+eas login
+
+# 3. Gerar APK de visualização direta
+eas build -p android --profile preview
 ```
+
+---
+
+## 📚 Documentação Complementar
+
+* [**AGENTS.md**](./AGENTS.md): Regras de desenvolvimento, restrições e diretrizes operacionais.
+* [**TROUBLESHOOTING.md**](./TROUBLESHOOTING.md): Histórico completo de problemas enfrentados, causas raiz e soluções de engenharia implementadas.

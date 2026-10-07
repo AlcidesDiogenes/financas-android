@@ -1,51 +1,52 @@
-# Regras do Projeto (Finanças Android)
+# Diretrizes e Regras do Projeto (Finanças Android)
 
-## 🚨 REGRA INVIOLÁVEL: PLANEJAMENTO E APROVAÇÃO PRÉVIA ANTES DE CODAR
-Antes de criar, alterar ou editar qualquer código ou arquivo do projeto:
-1. **Elaborar Plano Detalhado**: Apresentar de forma clara o que vai ser feito, a causa do problema/objetivo, os arquivos impactados e os passos da implementação.
-2. **Aguardar Aprovação do Usuário**: É **TERMINANTEMENTE PROIBIDO** codar ou aplicar alterações de código sem antes apresentar o plano e receber a confirmação explícita do usuário autorizando a execução.
-3. **Não Enviar para o Git sem Confirmação**: Jamais fazer commit ou push no Git sem confirmação e autorização prévia e explícita do usuário.
+## 🚨 REGRAS INVIOLÁVEIS DO PROJETO
+
+1. **PLANEJAMENTO E APROVAÇÃO PRÉVIA ANTES DE CODAR:**
+   - Antes de criar, alterar ou editar qualquer código ou arquivo do projeto:
+     - Elaborar plano detalhado explicando o que será feito, a causa raiz do problema e os arquivos impactados.
+     - **Aguardar aprovação explícita do usuário**: É terminantemente proibido alterar código sem aprovação prévia do plano.
+2. **NUNCA COMMITAR OU DAR PUSH NO GIT SEM CONFIRMAÇÃO:**
+   - Jamais executar `git commit` ou `git push` sem autorização explícita e direta do usuário na mensagem.
+3. **ESPELHO EM `C:\Financas` (SOMENTE PARA COMPILAÇÃO LOCAL):**
+   - A pasta `C:\Financas` serve exclusivamente para contornar problemas de espaços no caminho durante compilações nativas locais do Android (Gradle/CMake/NDK).
+   - **Espelhar APENAS quando for solicitado explicitamente um comando de compilação nativa local** (ex: `gradlew assembleRelease` ou build nativo local do Android).
+   - No desenvolvimento diário, testes com Expo Go, commits no Git e checagem de tipos (`cmd /c npx tsc --noEmit`), trabalhar e validar diretamente no repositório principal `C:\Users\alcidesdiogenes\Desktop\Projetos\Financas android`.
 
 ---
 
-This is an Expo/React Native mobile application. Prioritize mobile-first patterns, performance, and cross-platform compatibility.
+## 📱 Arquitetura Real do Projeto (Expo / React Native)
 
-## Expo has changed — do not trust your training data
+> **ATENÇÃO:** Este projeto **NÃO** utiliza `expo-router` e **NÃO** possui rotas baseadas em arquivos em `src/app/`.
+> A navegação é baseada em abas nativas gerenciada por estado central no componente `src/navigation/MainNavigator.tsx`.
 
-Expo ships breaking changes every SDK release. APIs you remember are likely renamed, moved, or removed. Before writing any code that touches an Expo, EAS, or React Native API:
+### Estrutura de Pastas e Responsabilidades
+- `src/navigation/MainNavigator.tsx`: Navegador principal por abas (Início, Extrato, Recorrentes, Planejar, Ajustes, Espaços).
+- `src/screens/*`: Telas completas do aplicativo (`HomeScreen`, `TransactionsScreen`, `RecurringsScreen`, `PlanningScreen`, `SettingsScreen`, `WorkspacesScreen`, `AuthScreen`, `OnboardingScreen`).
+- `src/modules/*`: Módulos de domínio desacoplados:
+  - `recurrings`: Componentes, tipos e lógica de contas fixas e proventos.
+  - `workspaces`: Gerenciamento de espaços Solo e Compartilhados, aprovação de membros e permissões.
+  - `FinanceContext.tsx`: Contexto central que orquestra dados financeiros em memória e sincronização.
+- `src/services/*`: Serviços externos e infraestrutura:
+  - `auth`: Autenticação e sessão do usuário (`AuthContext.tsx`).
+  - `security`: Biometria nativa e bloqueio de tela por inatividade (`SecurityContext.tsx`).
+  - `supabase`: Cliente Supabase (`supabaseClient.ts`) e sincronizador resiliente (`CloudSyncService.ts`).
+- `src/core/*`: Design System, componentes base (`Button`, `Card`, `Input`, `Badge`, `ModalContainer`), tema claro/escuro (`ThemeContext.tsx`), privacidade (`PrivacyContext.tsx`), utilitários de formatação e controle de versão (`src/core/version.ts`).
 
-1. Read the major version of the `expo` package in `package.json`.
-2. Fetch the matching versioned docs: `https://docs.expo.dev/versions/v<major>.0.0/`
-3. For anything else, fetch https://docs.expo.dev/llms.txt — an index of all Expo docs with corrections to common LLM misconceptions. Follow its links to the specific page you need; never answer from memory.
+### Estratégia de Dados (Offline-First)
+- **Persistência Local Instantânea:** Todas as mutações são salvas imediatamente no `AsyncStorage`, garantindo resposta imediata na UI sem travamentos.
+- **Sincronização em Nuvem em Segundo Plano:** O `CloudSyncService` sincroniza alterações com o Supabase quando há conexão com a internet.
+- **Isolamento por Workspace:** Toda transação, recorrência, orçamento e meta possui `workspace_id` associado, garantindo isolamento total entre espaços.
 
-## Commands
+### Padrões de Código e UI
+- **TypeScript Strict Mode:** Toda tipagem deve ser estrita, evitando `any`.
+- **Tema Dinâmico:** Sempre consumir cores e tokens via `useTheme()` (`theme.background`, `theme.card`, `theme.primary`, `theme.text`, etc.).
+- **Gesto e Animações:** Usar `Animated` nativo da `react-native`. Ações de swipe (arrastar para pagar/excluir) devem ter tolerância calibrada e retorno suave com mola.
+- **Sem Drag-and-Drop em Listas com Scroll:** As listas devem manter ordenação cronológica ou natural previsível (ex: dia de vencimento `dueDay`), evitando conflitos entre `PanResponder` e `ScrollView`.
 
-Use `bunx` instead of `npx` if the project uses bun (`bun.lock` present).
-
+### Comandos Essenciais
 ```bash
-npx expo install <package>  # ALWAYS use instead of npm/yarn/pnpm/bun add — resolves SDK-compatible versions
-npx expo start              # start the dev server
-npx expo lint               # lint
-npx tsc --noEmit            # typecheck
-npx expo-doctor             # diagnose dependency and config issues
-npx expo install --fix      # fix incompatible package versions
+npx expo start              # Inicia o servidor de desenvolvimento Expo
+cmd /c npx tsc --noEmit     # Verificação rigorosa de tipos TypeScript (deve passar com 0 erros)
+npx expo install <package>  # Instala pacotes compatíveis com o SDK do Expo
 ```
-
-Run lint and typecheck before declaring any task done.
-
-## Navigation & Routing
-
-- Use **Expo Router** for all navigation. Routes live in `src/app/` — every file there is a screen, `_layout.tsx` files define navigators. Keep non-route code (components, hooks, utils) outside `src/app/`.
-- Import `Link`, `router`, and `useLocalSearchParams` from `expo-router`.
-- Docs: https://docs.expo.dev/router/introduction.md
-
-## Building with EAS
-
-Use EAS to build, sign, and submit the app in the cloud (`eas build`, `eas submit`) and to ship over-the-air updates (`eas update`) — no local Xcode or Android Studio required. Run EAS CLI as `bunx eas-cli <command>` in Bun projects, or `npx eas-cli@latest <command>` otherwise; substitute that for bare `eas` in docs examples.
-Docs: https://docs.expo.dev/eas/index.md
-
-## Rules
-
-- If `ios/` and `android/` directories do not exist, they are generated (Continuous Native Generation). Never create or edit them by hand — configure native behavior in `app.json` and config plugins.
-- Expo Go only includes its bundled native modules. After adding a library with native code, the app needs a development build: `npx expo run:ios|android` locally, or `eas build --profile development`.
-- Prefer recommended Expo modules over third-party libraries, and check your available skills before adding dependencies. Docs: https://docs.expo.dev/versions/latest/index.md
