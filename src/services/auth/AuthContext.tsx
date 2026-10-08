@@ -87,8 +87,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
               name: session.user.user_metadata?.name || 'Usuário',
             });
             setIsGuest(false);
+            setIsPasswordRecovery(true);
           }
-          setIsPasswordRecovery(true);
         }
       });
       authSubscription = data.subscription;
@@ -104,21 +104,27 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const extractUrlParams = (url: string): Record<string, string> => {
     const params: Record<string, string> = {};
+
+    const extractFromPart = (part: string) => {
+      part.split('&').forEach((item) => {
+        const eqIdx = item.indexOf('=');
+        if (eqIdx !== -1) {
+          const key = decodeURIComponent(item.substring(0, eqIdx).trim());
+          const val = decodeURIComponent(item.substring(eqIdx + 1).trim());
+          if (key) params[key] = val;
+        }
+      });
+    };
+
     const queryIndex = url.indexOf('?');
     if (queryIndex !== -1) {
       const queryPart = url.substring(queryIndex + 1).split('#')[0];
-      queryPart.split('&').forEach((part) => {
-        const [k, v] = part.split('=');
-        if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
-      });
+      extractFromPart(queryPart);
     }
     const hashIndex = url.indexOf('#');
     if (hashIndex !== -1) {
       const hashPart = url.substring(hashIndex + 1);
-      hashPart.split('&').forEach((part) => {
-        const [k, v] = part.split('=');
-        if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
-      });
+      extractFromPart(hashPart);
     }
     return params;
   };
@@ -132,15 +138,46 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         url.toLowerCase().includes('type=recovery') ||
         url.toLowerCase().includes('reset-password');
 
+      // Se o link contiver parâmetros de erro do Supabase (ex: link expirado ou acesso negado)
+      if (params.error || params.error_description) {
+        const desc = params.error_description
+          ? decodeURIComponent(params.error_description).replace(/\+/g, ' ')
+          : 'O link acessado é inválido ou já expirou.';
+        Alert.alert(
+          'Link Expirado ou Inválido ⚠️',
+          `${desc}\n\nPor favor, solicite um novo link de redefinição de senha.`,
+          [{ text: 'Entendido' }]
+        );
+        return;
+      }
+
       // 1. Processar PKCE code se presente
       if (params.code) {
-        await client.auth.exchangeCodeForSession(params.code);
-      } else if (params.access_token && params.refresh_token) {
+        const { error: codeErr } = await client.auth.exchangeCodeForSession(
+          params.code,
+          params.flow_id ? { flowId: params.flow_id } : undefined
+        );
+        if (codeErr) {
+          console.warn('Erro ao trocar code por sessão:', codeErr);
+        }
+      } else if (params.access_token) {
         // 2. Processar tokens no hash (#access_token=...)
-        await client.auth.setSession({
+        const { error: tokenErr } = await client.auth.setSession({
           access_token: params.access_token,
-          refresh_token: params.refresh_token,
+          refresh_token: params.refresh_token || '',
         });
+        if (tokenErr) {
+          console.warn('Erro ao definir sessão com access_token:', tokenErr);
+        }
+      } else if (params.token_hash) {
+        // 3. Processar token_hash OTP se presente
+        const { error: otpErr } = await client.auth.verifyOtp({
+          token_hash: params.token_hash,
+          type: (params.type as any) || (isRecovery ? 'recovery' : 'email'),
+        });
+        if (otpErr) {
+          console.warn('Erro ao verificar OTP:', otpErr);
+        }
       }
 
       // Verifica a sessão resultante
@@ -166,7 +203,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
           Alert.alert('Conta Confirmada! 🎉', 'Seu e-mail foi verificado com sucesso. Bem-vindo!');
         }
       } else if (isRecovery) {
-        setIsPasswordRecovery(true);
+        // Sessão não foi estabelecida a partir do link
+        Alert.alert(
+          'Link Expirado ou Inválido ⚠️',
+          'Não foi possível validar seu link de recuperação de senha (ele pode ter expirado ou já ter sido utilizado).\n\nPor favor, solicite um novo link de redefinição no aplicativo.',
+          [{ text: 'Entendido' }]
+        );
       }
     } catch (e) {
       console.warn('Erro ao processar deep link de autenticação:', e);
@@ -228,6 +270,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
     if (lower.includes('user not found')) {
       return 'Nenhuma conta cadastrada com este e-mail.';
+    }
+    if (lower.includes('auth session missing') || lower.includes('session missing')) {
+      return 'Sua sessão expirou ou é inválida. Por favor, solicite um novo link de redefinição de senha no seu e-mail.';
     }
     return msg;
   };

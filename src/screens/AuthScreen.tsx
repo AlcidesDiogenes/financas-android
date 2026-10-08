@@ -14,6 +14,7 @@ import { useAuth } from '../services/auth/AuthContext';
 import { Input } from '../core/components/Input';
 import { Button } from '../core/components/Button';
 import { Card } from '../core/components/Card';
+import { AuthFeedbackModal } from '../core/components/AuthFeedbackModal';
 import { Ionicons } from '@expo/vector-icons';
 
 interface AuthScreenProps {
@@ -35,6 +36,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
   const [emailError, setEmailError] = useState('');
   const [passwordError, setPasswordError] = useState('');
   const [showResendBtn, setShowResendBtn] = useState(false);
+  const [feedbackModal, setFeedbackModal] = useState<{
+    visible: boolean;
+    type: 'reset_password' | 'email_confirmation';
+    title?: string;
+    email: string;
+    subtitle?: string;
+    hintText?: string;
+    buttonText?: string;
+  } | null>(null);
 
   const handleResendEmail = async () => {
     if (!email.trim()) {
@@ -48,10 +58,15 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
     if (!res.success) {
       setErrorMessage(res.error || 'Erro ao reenviar e-mail.');
     } else {
-      Alert.alert(
-        'E-mail Reenviado! 📬',
-        `Um novo link de ativação foi enviado para:\n\n${email.trim()}\n\nVerifique sua caixa de entrada e pasta de spam.`
-      );
+      setFeedbackModal({
+        visible: true,
+        type: 'email_confirmation',
+        title: 'E-mail Reenviado! 📬',
+        email: email.trim(),
+        subtitle: 'Um novo link de ativação foi enviado para:',
+        hintText: 'Verifique sua caixa de entrada e pasta de spam para ativar sua conta.',
+        buttonText: 'Entendido',
+      });
     }
   };
 
@@ -118,19 +133,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
           );
         }
       } else if (res.requiresEmailConfirmation) {
-        Alert.alert(
-          'Quase lá! Confirme seu E-mail 📬',
-          `Enviamos um link de ativação para:\n\n${email.trim()}\n\nPor favor, abra sua caixa de entrada (ou pasta de spam) e clique no link para ativar sua conta antes de fazer login.`,
-          [
-            {
-              text: 'Entendi, ir para Login',
-              onPress: () => {
-                setMode('signin');
-                setPassword('');
-              },
-            },
-          ]
-        );
+        setFeedbackModal({
+          visible: true,
+          type: 'email_confirmation',
+          email: email.trim(),
+        });
       } else {
         if (onClose) onClose();
       }
@@ -170,19 +177,11 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
     if (!res.success) {
       setErrorMessage(res.error || 'Erro ao solicitar recuperação de senha.');
     } else {
-      Alert.alert(
-        'E-mail Enviado! 📬',
-        `Enviamos um link seguro de redefinição de senha para:\n\n${email.trim()}\n\nVerifique sua caixa de entrada (e pasta de spam) para cadastrar sua nova senha.`,
-        [
-          {
-            text: 'Ir para Entrar',
-            onPress: () => {
-              setMode('signin');
-              setErrorMessage('');
-            },
-          },
-        ]
-      );
+      setFeedbackModal({
+        visible: true,
+        type: 'reset_password',
+        email: email.trim(),
+      });
     }
   };
 
@@ -444,6 +443,28 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
           </TouchableOpacity>
         )}
       </ScrollView>
+
+      {/* Modal Temático de Feedback de Autenticação */}
+      <AuthFeedbackModal
+        visible={!!feedbackModal?.visible}
+        type={feedbackModal?.type}
+        title={feedbackModal?.title}
+        email={feedbackModal?.email}
+        subtitle={feedbackModal?.subtitle}
+        hintText={feedbackModal?.hintText}
+        buttonText={feedbackModal?.buttonText}
+        onConfirm={() => {
+          const type = feedbackModal?.type;
+          setFeedbackModal(null);
+          if (type === 'reset_password') {
+            setMode('signin');
+            setErrorMessage('');
+          } else if (type === 'email_confirmation') {
+            setMode('signin');
+            setPassword('');
+          }
+        }}
+      />
     </KeyboardAvoidingView>
   );
 };
