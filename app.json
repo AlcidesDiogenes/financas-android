@@ -2,7 +2,6 @@
   "expo": {
     "name": "Finanças",
     "slug": "financas-app",
-    "privacy": "hidden",
     "scheme": "financas",
     "version": "1.0.0",
     "orientation": "portrait",
@@ -26,7 +25,9 @@
       "favicon": "./assets/favicon.png"
     },
     "plugins": [
-      "expo-sharing"
+      "expo-sharing",
+      "expo-font",
+      "expo-asset"
     ],
     "extra": {
       "eas": {

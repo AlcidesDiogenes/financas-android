@@ -15,6 +15,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { OnboardingScreen, ONBOARDING_COMPLETED_KEY } from './src/screens/OnboardingScreen';
 
 import { WhatsNewModal } from './src/core/components/WhatsNewModal';
+import { ErrorBoundary } from './src/core/components/ErrorBoundary';
 import { APP_VERSION_CONFIG, RELEASE_HISTORY, ReleaseNote } from './src/core/version';
 
 const LAST_SEEN_VERSION_KEY = '@financas:last_seen_app_version';
@@ -151,17 +152,20 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <PrivacyProvider>
-          <BottomBarBadgeProvider>
-            <SwipeActionProvider>
-              <AuthProvider>
-                <SecurityProvider>
-                  <ThemedApp />
-                </SecurityProvider>
-              </AuthProvider>
-            </SwipeActionProvider>
-          </BottomBarBadgeProvider>
-        </PrivacyProvider>
+        {/* Erro inesperado ao desenhar qualquer tela mostra uma tela amigável, não a tela em branco */}
+        <ErrorBoundary>
+          <PrivacyProvider>
+            <BottomBarBadgeProvider>
+              <SwipeActionProvider>
+                <AuthProvider>
+                  <SecurityProvider>
+                    <ThemedApp />
+                  </SecurityProvider>
+                </AuthProvider>
+              </SwipeActionProvider>
+            </BottomBarBadgeProvider>
+          </PrivacyProvider>
+        </ErrorBoundary>
       </ThemeProvider>
     </SafeAreaProvider>
   );
