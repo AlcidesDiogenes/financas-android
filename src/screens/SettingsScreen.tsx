@@ -34,7 +34,7 @@ import { runSafely } from '../core/utils/runSafely';
 import { AuthScreen } from './AuthScreen';
 import { OnboardingScreen } from './OnboardingScreen';
 import { PreferencesSelectorModal, PreferenceModalType } from './settings/components/PreferencesSelectorModal';
-import { OTAUpdateModal } from './settings/components/OTAUpdateModal';
+import { OTAUpdateModal, OTAUpdateStep } from './settings/components/OTAUpdateModal';
 import { ChangePasswordModal } from './settings/components/ChangePasswordModal';
 import { EditProfileModal } from './settings/components/EditProfileModal';
 import { TransferOwnershipModal, PendingWorkspaceTransfer } from './settings/components/TransferOwnershipModal';
@@ -63,10 +63,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
 
   // Modal Customizado de Atualizações OTA
   const [showUpdateModal, setShowUpdateModal] = useState(false);
-  const [updateStep, setUpdateStep] = useState<'available' | 'downloading' | 'installing' | 'ready'>('available');
+  const [updateStep, setUpdateStep] = useState<OTAUpdateStep>('checking');
   const [updateStage, setUpdateStage] = useState<'download' | 'install' | 'ready'>('download');
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState(0);
   const [updateStatusText, setUpdateStatusText] = useState('');
+  const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [isReloadingApp, setIsReloadingApp] = useState(false);
 
   // Modais de Senha, Perfil e Transferência
@@ -112,15 +113,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
 
   // Verificação e Download de Atualizações Online (OTA Updates)
   const handleCheckForUpdates = async () => {
-    try {
-      setIsCheckingUpdate(true);
-      setStatusMessage('Buscando atualizações...');
+    setUpdateErrorMessage('');
+    setUpdateStep('checking');
+    setShowUpdateModal(true);
+    setIsCheckingUpdate(true);
+    setStatusMessage('Buscando atualizações...');
 
+    try {
       // Verifica se o expo-updates está habilitado no ambiente (build nativo/APK)
       if (!Updates.isEnabled) {
-        Alert.alert(
-          'Modo de Desenvolvimento',
-          'O serviço de atualizações online (OTA) só funciona no APK instalado no aparelho.'
+        setUpdateStep('error');
+        setUpdateErrorMessage(
+          'O serviço de atualizações online (OTA) só funciona no APK instalado no aparelho (fora do Expo Go ou modo de desenvolvimento local).'
         );
         return;
       }
@@ -148,23 +152,18 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         setUpdateStep('available');
         setUpdateDownloadProgress(0);
         setUpdateStatusText('Nova versão pronta para download');
-        setShowUpdateModal(true);
       } else {
-        Alert.alert(
-          'Aplicativo em Dia! ✨',
-          `Você já está utilizando a versão mais recente (${getAppVersionString()}). Nenhuma atualização pendente.`
-        );
+        setUpdateStep('up_to_date');
       }
     } catch (err: any) {
       const msg = err?.message || '';
+      setUpdateStep('error');
       if (msg.includes('network') || msg.includes('Failed to fetch') || msg.includes('connection')) {
-        Alert.alert(
-          'Sem Conexão',
-          'Não foi possível conectar ao servidor de atualizações. Verifique se o seu celular está conectado à internet (Wi-Fi ou 4G/5G).'
+        setUpdateErrorMessage(
+          'Não foi possível conectar ao servidor de atualizações. Verifique se o seu celular está conectado à internet (Wi-Fi ou dados móveis).'
         );
       } else {
-        Alert.alert(
-          'Falha na Verificação',
+        setUpdateErrorMessage(
           `Não foi possível checar atualizações no momento.\n\nDetalhes:\nCanal do App: "${Updates.channel || 'nenhum'}"\nRuntime: "${Updates.runtimeVersion || 'padrão'}"\nErro: ${msg}`
         );
       }
@@ -247,10 +246,9 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       setUpdateStep('ready');
     } catch (downloadErr: any) {
       clearInterval(downloadInterval);
-      setShowUpdateModal(false);
-      Alert.alert(
-        'Falha na Atualização',
-        `Não foi possível concluir o download:\n${downloadErr?.message || 'Verifique sua conexão com a internet e tente novamente.'}`
+      setUpdateStep('error');
+      setUpdateErrorMessage(
+        `Não foi possível concluir o download da atualização:\n${downloadErr?.message || 'Verifique sua conexão com a internet e tente novamente.'}`
       );
     }
   };
@@ -933,9 +931,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         stage={updateStage}
         downloadProgress={updateDownloadProgress}
         statusText={updateStatusText}
+        errorMessage={updateErrorMessage}
+        currentVersion={getAppVersionString()}
         isReloadingApp={isReloadingApp}
         onStartUpdate={handleStartUpdateDownload}
         onRestartApp={handleRelaunchApp}
+        onRetryCheck={updateStep === 'error' ? handleCheckForUpdates : undefined}
         onClose={() => setShowUpdateModal(false)}
       />
 

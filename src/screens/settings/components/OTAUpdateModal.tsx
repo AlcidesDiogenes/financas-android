@@ -10,15 +10,27 @@ import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { Button } from '../../../core/components/Button';
 
+export type OTAUpdateStep =
+  | 'checking'
+  | 'up_to_date'
+  | 'available'
+  | 'downloading'
+  | 'installing'
+  | 'ready'
+  | 'error';
+
 interface OTAUpdateModalProps {
   visible: boolean;
-  step: 'available' | 'downloading' | 'installing' | 'ready';
-  stage: 'download' | 'install' | 'ready';
+  step: OTAUpdateStep;
+  stage?: 'download' | 'install' | 'ready';
   downloadProgress: number;
-  statusText: string;
+  statusText?: string;
+  errorMessage?: string;
+  currentVersion?: string;
   isReloadingApp: boolean;
   onStartUpdate: () => void;
   onRestartApp: () => void;
+  onRetryCheck?: () => void;
   onClose: () => void;
 }
 
@@ -28,9 +40,12 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
   stage,
   downloadProgress,
   statusText,
+  errorMessage,
+  currentVersion,
   isReloadingApp,
   onStartUpdate,
   onRestartApp,
+  onRetryCheck,
   onClose,
 }) => {
   const { theme, isDark } = useTheme();
@@ -61,57 +76,113 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                   styles.updateIconCircle,
                   {
                     backgroundColor:
-                      step === 'ready'
-                        ? '#E8F5E9'
-                        : step === 'installing'
-                        ? '#EDE7F6'
+                      step === 'checking'
+                        ? (isDark ? '#1E293B' : '#E0F2FE')
+                        : step === 'up_to_date' || step === 'ready'
+                        ? (isDark ? '#064E3B' : '#E8F5E9')
+                        : step === 'installing' || step === 'available'
+                        ? (isDark ? '#2E1065' : '#EDE7F6')
                         : step === 'downloading'
-                        ? '#E3F2FD'
-                        : '#EDE7F6',
+                        ? (isDark ? '#1E3A8A' : '#E3F2FD')
+                        : (isDark ? '#450A0A' : '#FEE2E2'), // error
+                  },
+                ]}
+              >
+                {step === 'checking' ? (
+                  <ActivityIndicator size="large" color={theme.primary} />
+                ) : (
+                  <Ionicons
+                    name={
+                      step === 'up_to_date' || step === 'ready'
+                        ? 'checkmark-circle'
+                        : step === 'installing'
+                        ? 'construct'
+                        : step === 'downloading'
+                        ? 'cloud-download'
+                        : step === 'available'
+                        ? 'rocket'
+                        : 'alert-circle'
+                    }
+                    size={38}
+                    color={
+                      step === 'up_to_date' || step === 'ready'
+                        ? '#10B981'
+                        : step === 'installing'
+                        ? '#8B5CF6'
+                        : step === 'downloading'
+                        ? theme.primary
+                        : step === 'available'
+                        ? '#8B5CF6'
+                        : '#EF4444'
+                    }
+                  />
+                )}
+              </View>
+            </View>
+
+            {/* Título do Modal */}
+            <Text style={[styles.updateModalTitle, { color: theme.text }]}>
+              {step === 'checking'
+                ? 'Buscando Atualizações...'
+                : step === 'up_to_date'
+                ? 'Aplicativo em Dia! ✨'
+                : step === 'available'
+                ? 'Nova Versão Disponível! 🎉'
+                : step === 'downloading'
+                ? 'Baixando Arquivos...'
+                : step === 'installing'
+                ? 'Instalando Atualização...'
+                : step === 'ready'
+                ? 'Atualização Pronta!'
+                : 'Não Foi Possível Atualizar'}
+            </Text>
+
+            {/* Subtítulo / Descrição */}
+            <Text style={[styles.updateModalSubtitle, { color: theme.textMuted }]}>
+              {step === 'checking'
+                ? 'Consultando os servidores para verificar se há novidades e melhorias para o seu aplicativo...'
+                : step === 'up_to_date'
+                ? (currentVersion
+                    ? `Você já está utilizando a versão mais recente (${currentVersion}). Nenhuma atualização pendente.`
+                    : 'Você já está utilizando a versão mais recente. Nenhuma atualização pendente.')
+                : step === 'available'
+                ? 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'
+                : step === 'downloading' || step === 'installing'
+                ? (statusText || 'Processando atualização...')
+                : step === 'ready'
+                ? 'Os novos arquivos foram instalados. Reinicie o aplicativo para ver as novidades imediatamente.'
+                : (errorMessage || 'Ocorreu uma falha ao buscar atualizações. Verifique sua conexão com a internet e tente novamente.')}
+            </Text>
+
+            {/* AVISO DE MANTER TELA LIGADA (EM DISPONÍVEL, BAIXANDO E INSTALANDO) */}
+            {(step === 'available' || step === 'downloading' || step === 'installing') && (
+              <View
+                style={[
+                  styles.screenOnAlertBox,
+                  {
+                    backgroundColor: isDark ? '#422006' : '#FEF3C7',
+                    borderColor: isDark ? '#78350F' : '#FDE68A',
                   },
                 ]}
               >
                 <Ionicons
-                  name={
-                    step === 'ready'
-                      ? 'checkmark-circle'
-                      : step === 'installing'
-                      ? 'construct'
-                      : step === 'downloading'
-                      ? 'cloud-download'
-                      : 'rocket'
-                  }
-                  size={36}
-                  color={
-                    step === 'ready'
-                      ? '#2E7D32'
-                      : step === 'installing'
-                      ? '#673AB7'
-                      : step === 'downloading'
-                      ? theme.primary
-                      : '#673AB7'
-                  }
+                  name="sunny"
+                  size={18}
+                  color={isDark ? '#FBBF24' : '#D97706'}
+                  style={{ marginRight: 8, marginTop: 1 }}
                 />
+                <Text
+                  style={[
+                    styles.screenOnAlertText,
+                    { color: isDark ? '#FDE68A' : '#92400E' },
+                  ]}
+                >
+                  {step === 'available'
+                    ? 'Mantenha a tela ligada e o app aberto durante o processo para não interromper a atualização.'
+                    : 'Deixe a tela ligada e não feche o app até concluir a instalação.'}
+                </Text>
               </View>
-            </View>
-
-            <Text style={[styles.updateModalTitle, { color: theme.text }]}>
-              {step === 'ready'
-                ? 'Atualização Pronta!'
-                : step === 'installing'
-                ? 'Instalando Atualização...'
-                : step === 'downloading'
-                ? 'Baixando Arquivos...'
-                : 'Nova Versão Disponível! 🎉'}
-            </Text>
-
-            <Text style={[styles.updateModalSubtitle, { color: theme.textMuted }]}>
-              {step === 'ready'
-                ? 'Os novos arquivos foram instalados. Reinicie o aplicativo para ver as novidades imediatamente.'
-                : step === 'installing' || step === 'downloading'
-                ? statusText
-                : 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'}
-            </Text>
+            )}
 
             {/* BARRA DE PROGRESSO VISUAL */}
             {(step === 'downloading' || step === 'installing') && (
@@ -127,7 +198,7 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                       styles.progressBarFill,
                       {
                         width: `${downloadProgress}%`,
-                        backgroundColor: step === 'installing' ? '#673AB7' : theme.primary,
+                        backgroundColor: step === 'installing' ? '#8B5CF6' : theme.primary,
                       },
                     ]}
                   />
@@ -137,39 +208,38 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                   <Text
                     style={[
                       styles.progressPercent,
-                      { color: step === 'installing' ? '#673AB7' : theme.primary },
+                      { color: step === 'installing' ? '#8B5CF6' : theme.primary },
                     ]}
                   >
                     {downloadProgress}%
                   </Text>
                   <ActivityIndicator
                     size="small"
-                    color={step === 'installing' ? '#673AB7' : theme.primary}
+                    color={step === 'installing' ? '#8B5CF6' : theme.primary}
                   />
-                </View>
-
-                {/* Dica amigável */}
-                <View
-                  style={[
-                    styles.hintBox,
-                    { backgroundColor: isDark ? '#262626' : '#F3F4F6' },
-                  ]}
-                >
-                  <Ionicons
-                    name="information-circle-outline"
-                    size={15}
-                    color={theme.textMuted}
-                    style={{ marginRight: 6 }}
-                  />
-                  <Text style={{ fontSize: 11, color: theme.textMuted, flex: 1 }}>
-                    Mantenha o app em primeiro plano para concluir mais rápido.
-                  </Text>
                 </View>
               </View>
             )}
 
             {/* AÇÕES DE BOTÕES */}
             <View style={styles.updateModalActions}>
+              {step === 'checking' && (
+                <Button
+                  title="Cancelar"
+                  variant="outline"
+                  onPress={onClose}
+                  style={{ width: '100%' }}
+                />
+              )}
+
+              {step === 'up_to_date' && (
+                <Button
+                  title="Entendido"
+                  onPress={onClose}
+                  style={{ width: '100%' }}
+                />
+              )}
+
               {step === 'available' && (
                 <>
                   <Button
@@ -192,6 +262,24 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                   onPress={onRestartApp}
                   style={{ width: '100%' }}
                 />
+              )}
+
+              {step === 'error' && (
+                <>
+                  {onRetryCheck && (
+                    <Button
+                      title="Tentar Novamente"
+                      onPress={onRetryCheck}
+                      style={{ flex: 1, marginRight: 8 }}
+                    />
+                  )}
+                  <Button
+                    title="Fechar"
+                    variant="outline"
+                    onPress={onClose}
+                    style={{ flex: onRetryCheck ? 1 : undefined, width: onRetryCheck ? undefined : '100%' }}
+                  />
+                </>
               )}
             </View>
           </View>
@@ -255,12 +343,27 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 19,
     textAlign: 'center',
-    marginBottom: 20,
+    marginBottom: 16,
     paddingHorizontal: 8,
+  },
+  screenOnAlertBox: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    borderRadius: 12,
+    borderWidth: 1,
+    marginBottom: 16,
+    width: '100%',
+  },
+  screenOnAlertText: {
+    fontSize: 12,
+    fontWeight: '600',
+    lineHeight: 17,
+    flex: 1,
   },
   progressContainer: {
     width: '100%',
-    marginBottom: 20,
+    marginBottom: 16,
   },
   progressBarBg: {
     height: 10,
@@ -281,13 +384,6 @@ const styles = StyleSheet.create({
   progressPercent: {
     fontSize: 14,
     fontWeight: '700',
-  },
-  hintBox: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    padding: 8,
-    borderRadius: 8,
-    marginTop: 10,
   },
   updateModalActions: {
     flexDirection: 'row',
