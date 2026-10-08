@@ -37,6 +37,7 @@ export interface RecurringMonthRecord {
   amount: number;
   isPaid: boolean;
   paidAt?: string;
+  paidBy?: string;
   transactionId?: string;
   updatedAt?: string;
 }

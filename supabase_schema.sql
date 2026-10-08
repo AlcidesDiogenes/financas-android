@@ -98,6 +98,19 @@ CREATE TABLE IF NOT EXISTS public.goals (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- 5.1 Tabela de Histórico de Movimentações de Metas (Aportes e Resgates)
+CREATE TABLE IF NOT EXISTS public.goal_transactions (
+    id TEXT PRIMARY KEY,
+    goal_id TEXT REFERENCES public.goals(id) ON DELETE CASCADE,
+    workspace_id TEXT REFERENCES public.workspaces(id) ON DELETE CASCADE,
+    amount NUMERIC(12, 2) NOT NULL,
+    type TEXT NOT NULL CHECK (type IN ('deposit', 'withdraw')),
+    date TIMESTAMP WITH TIME ZONE NOT NULL DEFAULT NOW(),
+    created_by TEXT,
+    notes TEXT,
+    updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
+);
+
 -- ==============================================================================
 -- POLÍTICAS DE ACESSO (RLS - ROW LEVEL SECURITY)
 -- Aqui o RLS é apenas ligado (sem políticas = nenhum acesso). As políticas por
@@ -111,6 +124,7 @@ ALTER TABLE public.recurrings ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.recurring_month_records ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.budgets ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.goals ENABLE ROW LEVEL SECURITY;
+ALTER TABLE public.goal_transactions ENABLE ROW LEVEL SECURITY;
 
 
 -- ==============================================================================
@@ -124,6 +138,7 @@ ALTER PUBLICATION supabase_realtime ADD TABLE public.recurrings;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.recurring_month_records;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.budgets;
 ALTER PUBLICATION supabase_realtime ADD TABLE public.goals;
+ALTER PUBLICATION supabase_realtime ADD TABLE public.goal_transactions;
 
 -- ==============================================================================
 -- 6. ATUALIZAÇÕES DEFENSIVAS DE COLUNAS E ÍNDICES DE ALTA PERFORMANCE
@@ -175,6 +190,8 @@ CREATE INDEX IF NOT EXISTS idx_recurrings_workspace ON public.recurrings(workspa
 CREATE INDEX IF NOT EXISTS idx_recurring_month_records_workspace ON public.recurring_month_records(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_budgets_workspace ON public.budgets(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_goals_workspace ON public.goals(workspace_id);
+CREATE INDEX IF NOT EXISTS idx_goal_transactions_goal ON public.goal_transactions(goal_id);
+CREATE INDEX IF NOT EXISTS idx_goal_transactions_workspace ON public.goal_transactions(workspace_id);
 CREATE INDEX IF NOT EXISTS idx_workspace_members_email ON public.workspace_members(email);
 CREATE INDEX IF NOT EXISTS idx_workspaces_invite_code ON public.workspaces(invite_code);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_workspaces_invite_code_unique ON public.workspaces(invite_code) WHERE invite_code IS NOT NULL AND invite_code != 'SOLO-PRIVADO';

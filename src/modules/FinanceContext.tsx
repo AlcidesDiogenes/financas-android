@@ -10,8 +10,9 @@ import { RecurringRepository } from './recurrings/repository';
 import { RecurringMonthRepository } from './recurrings/monthRepository';
 import { Budget, BudgetProgress, isBudgetActiveInMonth } from './budgets/types';
 import { BudgetRepository } from './budgets/repository';
-import { Goal, GoalProgress } from './goals/types';
+import { Goal, GoalProgress, GoalTransaction } from './goals/types';
 import { GoalRepository } from './goals/repository';
+import { GoalTransactionRepository } from './goals/transactionRepository';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
 import { subscribeToCloudChanges } from '../services/supabase/RealtimeSync';
 import { getCurrentMonthYear } from '../core/utils/date';
@@ -28,6 +29,8 @@ interface FinanceContextType {
   budgetProgressList: BudgetProgress[];
   goals: Goal[];
   goalProgressList: GoalProgress[];
+  goalTransactions: GoalTransaction[];
+  getGoalTransactions: (goalId: string) => GoalTransaction[];
   monthlySummary: MonthlySummary & { totalSavedInMonth: number };
   projectedIncome: number;
   projectedExpense: number;
@@ -85,6 +88,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   const [allRecurringMonthRecords, setAllRecurringMonthRecords] = useState<RecurringMonthRecord[]>([]);
   const [allBudgets, setAllBudgets] = useState<Budget[]>([]);
   const [allGoals, setAllGoals] = useState<Goal[]>([]);
+  const [allGoalTransactions, setAllGoalTransactions] = useState<GoalTransaction[]>([]);
 
   // Modo de Saldo: 'realized' (Caixa Real) ou 'projected' (Competência / Previsto Total)
   const [balanceMode, setBalanceModeState] = useState<BalanceMode>('realized');
@@ -111,34 +115,38 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
   const reloadAll = async () => {
     // 1. Instant local load
-    const [t, r, rm, b, g] = await Promise.all([
+    const [t, r, rm, b, g, gtx] = await Promise.all([
       TransactionRepository.getAll(),
       RecurringRepository.getAll(),
       RecurringMonthRepository.getAll(),
       BudgetRepository.getAll(),
       GoalRepository.getAll(),
+      GoalTransactionRepository.getAll(),
     ]);
     setAllTransactions(t);
     setAllRecurrings(r);
     setAllRecurringMonthRecords(rm);
     setAllBudgets(b);
     setAllGoals(g);
+    setAllGoalTransactions(gtx);
 
     // 2. Background cloud pull
     CloudSyncService.syncCloudToLocal().then(async (res) => {
       if (res.success) {
-        const [freshT, freshR, freshRM, freshB, freshG] = await Promise.all([
+        const [freshT, freshR, freshRM, freshB, freshG, freshGtx] = await Promise.all([
           TransactionRepository.getAll(),
           RecurringRepository.getAll(),
           RecurringMonthRepository.getAll(),
           BudgetRepository.getAll(),
           GoalRepository.getAll(),
+          GoalTransactionRepository.getAll(),
         ]);
         setAllTransactions(freshT);
         setAllRecurrings(freshR);
         setAllRecurringMonthRecords(freshRM);
         setAllBudgets(freshB);
         setAllGoals(freshG);
+        setAllGoalTransactions(freshGtx);
       }
     }).catch(() => {});
   };
@@ -240,6 +248,17 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     () => allGoals.filter((g) => g.workspaceId === activeWorkspace.id),
     [allGoals, activeWorkspace.id]
   );
+
+  const goalTransactions = useMemo(
+    () => allGoalTransactions.filter((gt) => gt.workspaceId === activeWorkspace.id),
+    [allGoalTransactions, activeWorkspace.id]
+  );
+
+  const getGoalTransactions = (goalId: string) => {
+    return allGoalTransactions
+      .filter((gt) => gt.goalId === goalId && gt.workspaceId === activeWorkspace.id)
+      .sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime());
+  };
 
   // Month filtered transactions
   const monthTransactions = useMemo(() => {
@@ -634,6 +653,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     const steps: RollbackStep[] = [];
     let createdTx: Transaction | null = null;
     let removedTxId: string | null = null;
+    const authorName = user?.name || user?.email?.split('@')[0] || 'Você';
 
     if (newIsPaid) {
       // Create transaction in Extrato for this competence
@@ -650,7 +670,9 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         date: txDate,
         notes: `Recorrência (${String(selectedMonth).padStart(2, '0')}/${selectedYear})`,
         assignedTo: target.assignedTo,
+        paidBy: authorName,
         isRecurringGenerated: true,
+        updatedAt: new Date().toISOString(),
       };
       createdTx = newTx;
       transactionId = newTx.id;
@@ -679,6 +701,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       amount: currentAmount,
       isPaid: newIsPaid,
       paidAt: newIsPaid ? new Date().toISOString() : undefined,
+      paidBy: newIsPaid ? authorName : undefined,
       transactionId,
       updatedAt: new Date().toISOString(),
     };
@@ -891,6 +914,24 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       },
     ];
 
+    const authorName = user?.name || user?.email?.split('@')[0] || 'Você';
+    const nowIso = new Date().toISOString();
+    const goalTx: GoalTransaction = {
+      id: `gtx-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
+      goalId: id,
+      workspaceId: activeWorkspace.id,
+      amount,
+      type: mode,
+      date: nowIso,
+      createdBy: authorName,
+      notes: mode === 'deposit' ? `Aporte na meta "${previousGoal.title}"` : `Resgate da meta "${previousGoal.title}"`,
+      updatedAt: nowIso,
+    };
+    steps.push({
+      run: () => GoalTransactionRepository.add(goalTx),
+      undo: () => GoalTransactionRepository.delete(goalTx.id),
+    });
+
     let tx: Transaction | null = null;
     if (createTransaction) {
       const today = new Date();
@@ -906,6 +947,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               category: 'Economia',
               date: txDate,
               notes: `Aporte na meta financeira "${previousGoal.title}"`,
+              paidBy: authorName,
+              updatedAt: nowIso,
             }
           : {
               id: `tx-goal-wth-${Date.now()}`,
@@ -916,6 +959,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
               category: 'Economia',
               date: txDate,
               notes: `Resgate da meta financeira "${previousGoal.title}"`,
+              paidBy: authorName,
+              updatedAt: nowIso,
             };
       const newTx = tx;
       steps.push({ run: () => TransactionRepository.add(newTx), undo: () => TransactionRepository.delete(newTx.id) });
@@ -923,13 +968,19 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     await runWithRollback(steps);
 
-    const [goals, txs] = await Promise.all([GoalRepository.getAll(), TransactionRepository.getAll()]);
+    const [goals, txs, gtxs] = await Promise.all([
+      GoalRepository.getAll(),
+      TransactionRepository.getAll(),
+      GoalTransactionRepository.getAll(),
+    ]);
     setAllGoals(goals);
     setAllTransactions(txs);
+    setAllGoalTransactions(gtxs);
 
     const item = goals.find((g) => g.id === id);
     if (item) await CloudSyncService.autoUpsertGoal(item);
     if (tx) await CloudSyncService.autoUpsertTransaction(tx);
+    await CloudSyncService.autoUpsertGoalTransaction(goalTx);
   };
 
   const depositGoal = (id: string, amount: number, createTransaction: boolean = true) =>
@@ -939,8 +990,13 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     moveGoalAmount(id, amount, 'withdraw', createTransaction);
 
   const deleteGoal = async (id: string) => {
-    const updated = await GoalRepository.delete(id);
-    setAllGoals(updated);
+    await GoalTransactionRepository.deleteByGoalId(id);
+    const [updatedGoals, updatedGtxs] = await Promise.all([
+      GoalRepository.delete(id),
+      GoalTransactionRepository.getAll(),
+    ]);
+    setAllGoals(updatedGoals);
+    setAllGoalTransactions(updatedGtxs);
     // Persist immediately to Supabase
     await CloudSyncService.autoDeleteGoal(id);
   };
@@ -956,6 +1012,8 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         budgetProgressList,
         goals,
         goalProgressList,
+        goalTransactions,
+        getGoalTransactions,
         monthlySummary,
         projectedIncome,
         projectedExpense,

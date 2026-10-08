@@ -72,8 +72,18 @@ export const parseMonthYear = (str: string): { month: number; year: number } | n
   return { month, year };
 };
 
-export const formatMonthYear = (month: number, year: number): string => {
-  return `${String(month).padStart(2, '0')}/${year}`;
+export const formatMonthYearLabel = (isoString: string): string => {
+  if (!isoString) return '';
+  const d = new Date(isoString);
+  if (isNaN(d.getTime())) return '';
+  const monthName = d.toLocaleDateString('pt-BR', { month: 'long' });
+  const capitalized = monthName.charAt(0).toUpperCase() + monthName.slice(1);
+  return `${capitalized}/${d.getFullYear()}`;
 };
 
-
+export const formatMonthYear = (monthOrIso: number | string, year?: number): string => {
+  if (typeof monthOrIso === 'string') {
+    return formatMonthYearLabel(monthOrIso);
+  }
+  return `${String(monthOrIso).padStart(2, '0')}/${year}`;
+};

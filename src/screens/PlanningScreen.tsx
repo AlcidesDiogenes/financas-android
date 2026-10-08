@@ -14,6 +14,7 @@ import { AddBudgetModal } from '../modules/budgets/components/AddBudgetModal';
 import { GoalItem } from '../modules/goals/components/GoalItem';
 import { AddGoalModal } from '../modules/goals/components/AddGoalModal';
 import { DepositGoalModal } from '../modules/goals/components/DepositGoalModal';
+import { GoalHistoryModal } from '../modules/goals/components/GoalHistoryModal';
 import { formatCurrency } from '../core/utils/currency';
 import { Card } from '../core/components/Card';
 import { Button } from '../core/components/Button';
@@ -41,6 +42,7 @@ export const PlanningScreen: React.FC = () => {
     depositGoal,
     withdrawGoal,
     deleteGoal,
+    getGoalTransactions,
   } = useFinance();
 
   const [activeTab, setActiveTab] = useState<'budgets' | 'goals'>('budgets');
@@ -58,7 +60,16 @@ export const PlanningScreen: React.FC = () => {
     mode: 'deposit' | 'withdraw';
   } | null>(null);
 
+  const [historyModalVisible, setHistoryModalVisible] = useState(false);
+  const [selectedGoalForHistory, setSelectedGoalForHistory] = useState<Goal | null>(null);
+
   const [goalFilter, setGoalFilter] = useState<'all' | 'active' | 'completed'>('active');
+
+  const activeGoalForHistory = useMemo(() => {
+    if (!selectedGoalForHistory) return null;
+    const found = goalProgressList.find((g) => g.goal.id === selectedGoalForHistory.id);
+    return found ? found.goal : selectedGoalForHistory;
+  }, [selectedGoalForHistory, goalProgressList]);
 
   // Overall budget numbers
   const budgetSummary = useMemo(() => {
@@ -352,6 +363,10 @@ export const PlanningScreen: React.FC = () => {
                     setGoalModalVisible(true);
                   }}
                   onDelete={deleteGoal}
+                  onPress={(goal) => {
+                    setSelectedGoalForHistory(goal);
+                    setHistoryModalVisible(true);
+                  }}
                   canEdit={canEdit}
                 />
               ))
@@ -422,6 +437,16 @@ export const PlanningScreen: React.FC = () => {
         initialMode={selectedGoalForDeposit?.mode || 'deposit'}
         maxWithdrawAmount={selectedGoalForDeposit?.currentAmount || 0}
         onSubmit={handleConfirmDepositOrWithdraw}
+      />
+
+      <GoalHistoryModal
+        visible={historyModalVisible}
+        onClose={() => {
+          setHistoryModalVisible(false);
+          setSelectedGoalForHistory(null);
+        }}
+        goal={activeGoalForHistory}
+        transactions={activeGoalForHistory ? getGoalTransactions(activeGoalForHistory.id) : []}
       />
     </View>
   );

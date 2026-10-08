@@ -4,7 +4,7 @@ import { Ionicons } from '@expo/vector-icons';
 import { Goal, GoalProgress } from '../types';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { formatCurrency } from '../../../core/utils/currency';
-import { formatShortDate } from '../../../core/utils/date';
+import { formatMonthYear } from '../../../core/utils/date';
 import { ProgressBar } from '../../../core/components/ProgressBar';
 import { Badge } from '../../../core/components/Badge';
 import { confirmAndRun } from '../../../core/utils/runSafely';
@@ -15,6 +15,7 @@ interface GoalItemProps {
   onWithdraw?: (goalId: string, currentTitle: string, currentAmount: number) => void;
   onEdit?: (goal: Goal) => void;
   onDelete?: (id: string) => void | Promise<void>;
+  onPress?: (goal: Goal) => void;
   canEdit?: boolean;
 }
 
@@ -24,13 +25,16 @@ export const GoalItem: React.FC<GoalItemProps> = ({
   onWithdraw,
   onEdit,
   onDelete,
+  onPress,
   canEdit = true,
 }) => {
   const { theme } = useTheme();
   const { goal, percentage, remainingAmount, isCompleted, monthsRemaining, monthlyNeeded } = progress;
 
   return (
-    <View
+    <TouchableOpacity
+      activeOpacity={onPress ? 0.8 : 1}
+      onPress={() => onPress && onPress(goal)}
       style={[
         styles.container,
         {
@@ -49,16 +53,16 @@ export const GoalItem: React.FC<GoalItemProps> = ({
               {goal.title}
             </Text>
             <Text style={[styles.deadline, { color: theme.textMuted }]}>
-              Meta até {formatShortDate(goal.deadlineDate)} ({monthsRemaining} {monthsRemaining === 1 ? 'mês' : 'meses'})
+              Meta até {formatMonthYear(goal.deadlineDate)} ({monthsRemaining} {monthsRemaining === 1 ? 'mês' : 'meses'})
             </Text>
           </View>
         </View>
 
         <View style={styles.right}>
           {isCompleted ? (
-            <Badge label="Concluída! 🎉" variant="success" />
+            <Badge label="Concluída! 🎉" variant="success" style={{ alignSelf: 'center' }} />
           ) : (
-            <Badge label={`${percentage}%`} variant="info" />
+            <Badge label={`${percentage}%`} variant="info" style={{ alignSelf: 'center' }} />
           )}
 
           {canEdit && onEdit && (
@@ -154,7 +158,15 @@ export const GoalItem: React.FC<GoalItemProps> = ({
           )}
         </View>
       )}
-    </View>
+
+      {/* Footer hint para ver histórico */}
+      <View style={styles.historyHintRow}>
+        <Ionicons name="time-outline" size={12} color={theme.textMuted} />
+        <Text style={[styles.historyHintText, { color: theme.textMuted }]}>
+          Toque no card para ver o histórico de movimentações
+        </Text>
+      </View>
+    </TouchableOpacity>
   );
 };
 
@@ -243,5 +255,16 @@ const styles = StyleSheet.create({
     fontSize: 13,
     fontWeight: '700',
     marginLeft: 6,
+  },
+  historyHintRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 10,
+    gap: 4,
+  },
+  historyHintText: {
+    fontSize: 11,
+    fontWeight: '500',
   },
 });

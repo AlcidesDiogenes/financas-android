@@ -7,10 +7,13 @@ import {
   rowToRecurring,
   rowToTransaction,
   transactionToRow,
+  goalTransactionToRow,
+  rowToGoalTransaction,
 } from '../syncMerge';
 import { syncQueueKey } from '../SyncQueue';
 import { Transaction } from '../../../modules/transactions/types';
 import { RecurringDebit } from '../../../modules/recurrings/types';
+import { GoalTransaction } from '../../../modules/goals/types';
 
 type Item = { id: string; workspaceId: string; title: string; updatedAt?: string };
 
@@ -217,6 +220,61 @@ describe('conversão local <-> nuvem', () => {
       notes: 'Fibra',
       monthlyOverrides: { '2026-10': 120 },
       excludedMonths: ['2026-11'],
+    });
+  });
+
+  it('transação preserva paidBy via anotação codificada e descriptografada', () => {
+    const tx: Transaction = {
+      id: 'tx-2',
+      workspaceId: SHARED_WS,
+      title: 'Energia',
+      amount: 150,
+      type: 'expense',
+      category: 'Moradia',
+      date: NEW,
+      notes: 'Conta de luz de outubro',
+      paidBy: 'Alcides',
+    };
+    const row = transactionToRow(tx, ctx);
+    expect(row.notes).toContain('<!--__PAID_BY__:Alcides-->');
+
+    const back = rowToTransaction({ ...row, amount: '150' });
+    expect(back.paidBy).toBe('Alcides');
+    expect(back.notes).toBe('Conta de luz de outubro');
+  });
+
+  it('goalTransaction converte corretamente para nuvem e volta para local', () => {
+    const gt: GoalTransaction = {
+      id: 'gt-1',
+      goalId: 'goal-1',
+      workspaceId: SHARED_WS,
+      amount: 500,
+      type: 'deposit',
+      date: NEW,
+      createdBy: 'maria@teste.local',
+      notes: 'Aporte mensal',
+      updatedAt: NEW,
+    };
+    const row = goalTransactionToRow(gt, ctx);
+    expect(row).toMatchObject({
+      id: 'gt-1',
+      goal_id: 'goal-1',
+      workspace_id: SHARED_WS,
+      amount: 500,
+      type: 'deposit',
+      created_by: 'maria@teste.local',
+      notes: 'Aporte mensal',
+    });
+
+    const back = rowToGoalTransaction({ ...row, amount: '500' });
+    expect(back).toMatchObject({
+      id: 'gt-1',
+      goalId: 'goal-1',
+      workspaceId: SHARED_WS,
+      amount: 500,
+      type: 'deposit',
+      createdBy: 'maria@teste.local',
+      notes: 'Aporte mensal',
     });
   });
 });

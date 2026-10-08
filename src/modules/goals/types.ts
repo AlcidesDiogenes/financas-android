@@ -20,3 +20,18 @@ export interface GoalProgress {
   monthsRemaining: number;
   monthlyNeeded: number;
 }
+
+export type GoalTransactionType = 'deposit' | 'withdraw';
+
+export interface GoalTransaction {
+  id: string;
+  goalId: string;
+  workspaceId: string;
+  amount: number;
+  type: GoalTransactionType;
+  date: string; // ISO date
+  createdBy?: string;
+  notes?: string;
+  updatedAt?: string;
+}
+

@@ -7,10 +7,11 @@ import { RecurringRepository } from '../../modules/recurrings/repository';
 import { RecurringMonthRepository } from '../../modules/recurrings/monthRepository';
 import { BudgetRepository } from '../../modules/budgets/repository';
 import { GoalRepository } from '../../modules/goals/repository';
+import { GoalTransactionRepository } from '../../modules/goals/transactionRepository';
 import { Transaction } from '../../modules/transactions/types';
 import { RecurringDebit, RecurringMonthRecord } from '../../modules/recurrings/types';
 import { Budget } from '../../modules/budgets/types';
-import { Goal } from '../../modules/goals/types';
+import { Goal, GoalTransaction } from '../../modules/goals/types';
 import {
   CloudRow,
   PendingSets,
@@ -20,11 +21,13 @@ import {
   budgetToRow,
   classifyError,
   goalToRow,
+  goalTransactionToRow,
   mergeById,
   monthRecordToRow,
   recurringToRow,
   rowToBudget,
   rowToGoal,
+  rowToGoalTransaction,
   rowToMonthRecord,
   rowToRecurring,
   rowToTransaction,
@@ -32,9 +35,21 @@ import {
   transactionToRow,
 } from './syncMerge';
 
-export { encodeRecurringNotes, decodeRecurringNotes } from './syncMerge';
+export {
+  encodeRecurringNotes,
+  decodeRecurringNotes,
+  encodeTransactionNotes,
+  decodeTransactionNotes,
+} from './syncMerge';
 
-const UPSERT_ORDER: SyncTable[] = ['transactions', 'recurrings', 'recurring_month_records', 'budgets', 'goals'];
+const UPSERT_ORDER: SyncTable[] = [
+  'transactions',
+  'recurrings',
+  'recurring_month_records',
+  'budgets',
+  'goals',
+  'goal_transactions',
+];
 const DELETE_ORDER: SyncTable[] = [...UPSERT_ORDER].reverse();
 
 const BOOTSTRAP_KEY_PREFIX = '@financas:sync_bootstrap_v1:';
@@ -111,6 +126,14 @@ export class CloudSyncService {
 
   static async autoDeleteGoal(id: string): Promise<void> {
     await this.queueAndFlush('goals', id, 'delete');
+  }
+
+  static async autoUpsertGoalTransaction(gt: GoalTransaction): Promise<void> {
+    await this.queueAndFlush('goal_transactions', gt.id, 'upsert');
+  }
+
+  static async autoDeleteGoalTransaction(id: string): Promise<void> {
+    await this.queueAndFlush('goal_transactions', id, 'delete');
   }
 
   static async getPendingCount(): Promise<number> {
@@ -204,6 +227,8 @@ export class CloudSyncService {
         return pick(await BudgetRepository.getAll(), budgetToRow);
       case 'goals':
         return pick(await GoalRepository.getAll(), goalToRow);
+      case 'goal_transactions':
+        return pick(await GoalTransactionRepository.getAll(), goalTransactionToRow);
     }
   }
 
@@ -328,12 +353,13 @@ export class CloudSyncService {
 
       // 3. Download completo
       const fetchStartedAt = Date.now();
-      const [txRows, recRows, monthRows, budgetRows, goalRows] = await Promise.all([
+      const [txRows, recRows, monthRows, budgetRows, goalRows, goalTxRows] = await Promise.all([
         this.fetchAllRows(client, 'transactions', allowedIds),
         this.fetchAllRows(client, 'recurrings', allowedIds),
         this.fetchAllRows(client, 'recurring_month_records', allowedIds),
         this.fetchAllRows(client, 'budgets', allowedIds),
         this.fetchAllRows(client, 'goals', allowedIds),
+        this.fetchAllRows(client, 'goal_transactions', allowedIds).catch(() => null),
       ]);
 
       // 4. Pendências atuais (protegem alterações locais ainda não enviadas)
@@ -444,6 +470,18 @@ export class CloudSyncService {
             local,
             cloud: goalRows.map(rowToGoal),
             timestamp: (g) => toTime(g.updatedAt || g.createdAt),
+          })
+        );
+      }
+
+      if (goalTxRows) {
+        await GoalTransactionRepository.mutate((local) =>
+          mergeById<GoalTransaction>({
+            ...base,
+            table: 'goal_transactions',
+            local,
+            cloud: goalTxRows.map(rowToGoalTransaction),
+            timestamp: (gt) => toTime(gt.updatedAt || gt.date),
           })
         );
       }

@@ -242,7 +242,7 @@ DO $$
 DECLARE
     t text;
 BEGIN
-    FOREACH t IN ARRAY ARRAY['transactions', 'recurrings', 'recurring_month_records', 'budgets', 'goals']
+    FOREACH t IN ARRAY ARRAY['transactions', 'recurrings', 'recurring_month_records', 'budgets', 'goals', 'goal_transactions']
     LOOP
         EXECUTE format(
             'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (private.is_ws_member(workspace_id))',
@@ -294,6 +294,7 @@ BEGIN
     DELETE FROM public.transactions WHERE workspace_id = personal_ws;
     DELETE FROM public.recurrings WHERE workspace_id = personal_ws;
     DELETE FROM public.budgets WHERE workspace_id = personal_ws;
+    DELETE FROM public.goal_transactions WHERE workspace_id = personal_ws;
     DELETE FROM public.goals WHERE workspace_id = personal_ws;
     DELETE FROM public.workspace_members WHERE workspace_id = personal_ws;
     DELETE FROM public.workspaces WHERE id = personal_ws;
@@ -333,6 +334,7 @@ BEGIN
                 DELETE FROM public.transactions WHERE workspace_id = ws.workspace_id;
                 DELETE FROM public.recurrings WHERE workspace_id = ws.workspace_id;
                 DELETE FROM public.budgets WHERE workspace_id = ws.workspace_id;
+                DELETE FROM public.goal_transactions WHERE workspace_id = ws.workspace_id;
                 DELETE FROM public.goals WHERE workspace_id = ws.workspace_id;
                 DELETE FROM public.workspace_members WHERE workspace_id = ws.workspace_id;
                 DELETE FROM public.workspaces WHERE id = ws.workspace_id;

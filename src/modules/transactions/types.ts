@@ -24,6 +24,7 @@ export interface Transaction {
   date: string; // ISO date
   notes?: string;
   createdBy?: string;
+  paidBy?: string;
   assignedTo?: string; // member name in shared workspace
   isRecurringGenerated?: boolean;
   updatedAt?: string; // ISO date timestamp for concurrency resolution

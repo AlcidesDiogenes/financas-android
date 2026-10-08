@@ -10,7 +10,7 @@ DECLARE
     t text;
 BEGIN
     FOREACH t IN ARRAY ARRAY['workspaces', 'workspace_members', 'transactions', 'recurrings',
-                             'recurring_month_records', 'budgets', 'goals']
+                             'recurring_month_records', 'budgets', 'goals', 'goal_transactions']
     LOOP
         IF NOT EXISTS (
             SELECT 1 FROM pg_publication_tables
@@ -22,7 +22,7 @@ BEGIN
 END;
 $$;
 
--- Conferência: deve listar as 7 tabelas
+-- Conferência: deve listar as 8 tabelas
 SELECT tablename
 FROM pg_publication_tables
 WHERE pubname = 'supabase_realtime' AND schemaname = 'public'

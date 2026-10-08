@@ -5,7 +5,13 @@ import { withStorageLock } from '../../core/storageLock';
 // Guarda apenas a referência (tabela + id + operação); no envio, a versão mais recente
 // do item é lida do armazenamento local.
 
-export type SyncTable = 'transactions' | 'recurrings' | 'recurring_month_records' | 'budgets' | 'goals';
+export type SyncTable =
+  | 'transactions'
+  | 'recurrings'
+  | 'recurring_month_records'
+  | 'budgets'
+  | 'goals'
+  | 'goal_transactions';
 export type SyncOperation = 'upsert' | 'delete';
 
 export interface SyncQueueEntry {

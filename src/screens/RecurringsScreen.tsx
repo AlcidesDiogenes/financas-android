@@ -111,6 +111,11 @@ export const RecurringsScreen: React.FC = () => {
 
     const netSurplus = totalIncome - totalExpense;
     const progressPercent = totalExpense > 0 ? Math.min(100, Math.round((paidExpense / totalExpense) * 100)) : 0;
+    const incomeProgressPercent = totalIncome > 0 ? Math.min(100, Math.round((receivedIncome / totalIncome) * 100)) : 0;
+    const totalConsolidated = totalExpense + totalIncome;
+    const paidConsolidated = paidExpense + receivedIncome;
+    const consolidatedProgressPercent =
+      totalConsolidated > 0 ? Math.min(100, Math.round((paidConsolidated / totalConsolidated) * 100)) : 0;
 
     return {
       totalExpense,
@@ -121,6 +126,8 @@ export const RecurringsScreen: React.FC = () => {
       pendingIncome,
       netSurplus,
       progressPercent,
+      incomeProgressPercent,
+      consolidatedProgressPercent,
       hasIncome: incomes.length > 0,
       hasExpense: expenses.length > 0,
       pendingCount: expenses.filter((r) => !r.isPaidCurrentMonth).length,
@@ -360,7 +367,11 @@ export const RecurringsScreen: React.FC = () => {
           <View style={styles.summaryHeaderRow}>
             <View style={{ flex: 1, marginRight: 8 }}>
               <Text style={[styles.summaryTitle, { color: theme.textMuted }]}>
-                {typeFilter === 'income' ? 'Renda Fixa Prevista' : 'Contas Recorrentes'} ({getMonthLabel(selectedMonth, selectedYear)})
+                {typeFilter === 'income'
+                  ? 'Renda Fixa Prevista'
+                  : typeFilter === 'expense'
+                  ? 'Despesas Fixas Previstas'
+                  : 'Contas Recorrentes'} ({getMonthLabel(selectedMonth, selectedYear)})
               </Text>
               <Text style={[styles.summaryAmount, { color: theme.text }]}>
                 {formatCurrency(typeFilter === 'income' ? stats.totalIncome : stats.totalExpense)}
@@ -368,7 +379,7 @@ export const RecurringsScreen: React.FC = () => {
             </View>
 
             {canEdit && (
-              <View style={{ alignItems: 'flex-end', gap: 6 }}>
+              <View style={{ alignItems: 'flex-end', justifyContent: 'center', minHeight: 34, gap: 6 }}>
                 {/* Botão de Pagar Débitos (aparece em "Todas" ou "Despesas" quando houver débitos pendentes) */}
                 {typeFilter !== 'income' && stats.pendingCount > 0 && (
                   <TouchableOpacity
@@ -397,32 +408,55 @@ export const RecurringsScreen: React.FC = () => {
             )}
           </View>
 
-          {/* Visual Progress Bar for Expenses */}
-          {typeFilter !== 'income' && stats.totalExpense > 0 && (
-            <View style={styles.progressSection}>
-              <View style={styles.progressInfoRow}>
-                <Text style={[styles.progressInfoText, { color: theme.textMuted }]}>
-                  Progresso de Pagamento
-                </Text>
-                <Text style={[styles.progressPercentText, { color: theme.primary, fontWeight: '700' }]}>
-                  {stats.progressPercent}% Concluído
-                </Text>
-              </View>
-              <View style={[styles.progressBarTrack, { backgroundColor: theme.surfaceVariant }]}>
-                <View
-                  style={[
-                    styles.progressBarFill,
-                    {
-                      width: `${stats.progressPercent}%`,
-                      backgroundColor: stats.progressPercent === 100 ? theme.success : theme.primary,
-                    },
-                  ]}
-                />
-              </View>
-            </View>
-          )}
+          {/* Visual Progress Bar (Padronizado e sempre presente em Todas, Despesas e Rendas) */}
+          {(() => {
+            const currentPercent =
+              typeFilter === 'income'
+                ? stats.incomeProgressPercent
+                : typeFilter === 'expense'
+                ? stats.progressPercent
+                : stats.consolidatedProgressPercent;
 
-          {/* Status Columns */}
+            const progressTitle =
+              typeFilter === 'income'
+                ? 'Progresso de Recebimento'
+                : typeFilter === 'expense'
+                ? 'Progresso de Pagamento'
+                : 'Progresso Consolidado';
+
+            const barColor =
+              currentPercent === 100
+                ? theme.success
+                : typeFilter === 'income'
+                ? '#10B981'
+                : theme.primary;
+
+            return (
+              <View style={styles.progressSection}>
+                <View style={styles.progressInfoRow}>
+                  <Text style={[styles.progressInfoText, { color: theme.textMuted }]}>
+                    {progressTitle}
+                  </Text>
+                  <Text style={[styles.progressPercentText, { color: barColor, fontWeight: '700' }]}>
+                    {currentPercent}% Concluído
+                  </Text>
+                </View>
+                <View style={[styles.progressBarTrack, { backgroundColor: theme.surfaceVariant }]}>
+                  <View
+                    style={[
+                      styles.progressBarFill,
+                      {
+                        width: `${currentPercent}%`,
+                        backgroundColor: barColor,
+                      },
+                    ]}
+                  />
+                </View>
+              </View>
+            );
+          })()}
+
+          {/* Status Columns (2 Colunas com estrutura fixa) */}
           <View style={[styles.statusRow, { borderTopColor: theme.border }]}>
             <View style={styles.statusCol}>
               <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 4 }}>
@@ -451,33 +485,31 @@ export const RecurringsScreen: React.FC = () => {
             </View>
           </View>
 
-          {/* Sobra Livre Recorrente (Rendas - Despesas Fixas) */}
-          {stats.hasIncome && typeFilter === 'all' && (
-            <View style={[styles.surplusRow, { borderTopColor: theme.border }]}>
-              <View>
-                <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '600' }}>
-                  Sobra Livre Fixa Prevista:
-                </Text>
-                <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>
-                  (Renda Fixa: {formatCurrency(stats.totalIncome)})
-                </Text>
-              </View>
-              <View style={{ alignItems: 'flex-end' }}>
-                <Text
-                  style={{
-                    fontSize: 16,
-                    fontWeight: '800',
-                    color: stats.netSurplus >= 0 ? theme.success : theme.danger,
-                  }}
-                >
-                  {formatCurrency(stats.netSurplus)}
-                </Text>
-                <Text style={{ fontSize: 10, color: theme.textMuted, fontWeight: '600' }}>
-                  {stats.netSurplus >= 0 ? 'Positivo' : 'Déficit'}
-                </Text>
-              </View>
+          {/* Sobra Livre Recorrente / Balanço Fixo (Padronizado e sempre presente para manter altura estável) */}
+          <View style={[styles.surplusRow, { borderTopColor: theme.border }]}>
+            <View>
+              <Text style={{ fontSize: 12, color: theme.textMuted, fontWeight: '600' }}>
+                Sobra Livre Fixa Prevista:
+              </Text>
+              <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 1 }}>
+                (Renda: {formatCurrency(stats.totalIncome)} • Despesas: {formatCurrency(stats.totalExpense)})
+              </Text>
             </View>
-          )}
+            <View style={{ alignItems: 'flex-end' }}>
+              <Text
+                style={{
+                  fontSize: 16,
+                  fontWeight: '800',
+                  color: stats.netSurplus >= 0 ? theme.success : theme.danger,
+                }}
+              >
+                {formatCurrency(stats.netSurplus)}
+              </Text>
+              <Text style={{ fontSize: 10, color: theme.textMuted, fontWeight: '600' }}>
+                {stats.netSurplus >= 0 ? 'Positivo' : 'Déficit'}
+              </Text>
+            </View>
+          </View>
         </Card>
 
         {/* Search Bar */}

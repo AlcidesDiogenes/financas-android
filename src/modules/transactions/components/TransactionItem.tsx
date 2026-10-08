@@ -58,6 +58,25 @@ export const TransactionItem: React.FC<TransactionItemProps> = ({
             </>
           ) : null}
         </View>
+        {transaction.paidBy ? (
+          <View style={styles.paidByRow}>
+            <Ionicons
+              name="checkmark-circle"
+              size={12}
+              color={isIncome ? theme.success : theme.primary}
+              style={{ marginRight: 3 }}
+            />
+            <Text
+              style={[
+                styles.paidByText,
+                { color: isIncome ? theme.success : theme.primary },
+              ]}
+              numberOfLines={1}
+            >
+              {isIncome ? 'Recebido por' : 'Pago por'} {transaction.paidBy}
+            </Text>
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.right}>
@@ -141,5 +160,14 @@ const styles = StyleSheet.create({
   },
   deleteBtn: {
     marginTop: 4,
+  },
+  paidByRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginTop: 3,
+  },
+  paidByText: {
+    fontSize: 11,
+    fontWeight: '600',
   },
 });

@@ -1,14 +1,15 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, StyleProp, ViewStyle } from 'react-native';
 import { useTheme } from '../theme/ThemeContext';
 
 interface BadgeProps {
   label: string;
   variant?: 'primary' | 'success' | 'danger' | 'warning' | 'info' | 'neutral';
   size?: 'sm' | 'md';
+  style?: StyleProp<ViewStyle>;
 }
 
-export const Badge: React.FC<BadgeProps> = ({ label, variant = 'primary', size = 'sm' }) => {
+export const Badge: React.FC<BadgeProps> = ({ label, variant = 'primary', size = 'sm', style }) => {
   const { theme } = useTheme();
 
   const getColors = () => {
@@ -37,6 +38,7 @@ export const Badge: React.FC<BadgeProps> = ({ label, variant = 'primary', size =
         styles.badge,
         { backgroundColor: bg },
         size === 'sm' ? styles.badgeSm : styles.badgeMd,
+        style,
       ]}
     >
       <Text

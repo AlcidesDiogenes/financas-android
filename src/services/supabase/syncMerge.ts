@@ -4,7 +4,7 @@ import { SyncTable, syncQueueKey } from './SyncQueue';
 import { Transaction } from '../../modules/transactions/types';
 import { RecurringDebit, RecurringMonthRecord } from '../../modules/recurrings/types';
 import { Budget } from '../../modules/budgets/types';
-import { Goal } from '../../modules/goals/types';
+import { Goal, GoalTransaction } from '../../modules/goals/types';
 
 export function encodeRecurringNotes(
   userNotes?: string | null,
@@ -62,6 +62,21 @@ export function decodeRecurringNotes(rawNotes?: string | null): {
   return { userNotes, monthlyOverrides, excludedMonths };
 }
 
+export function encodeTransactionNotes(notes?: string | null, paidBy?: string | null): string | null {
+  const cleanNotes = (notes || '').replace(/\s*<!--__PAID_BY__:[\s\S]*?-->/g, '').trim();
+  if (!paidBy) return cleanNotes || null;
+  const tag = `<!--__PAID_BY__:${paidBy}-->`;
+  return cleanNotes ? `${cleanNotes}\n${tag}` : tag;
+}
+
+export function decodeTransactionNotes(rawNotes?: string | null): { notes?: string; paidBy?: string } {
+  if (!rawNotes) return { notes: undefined, paidBy: undefined };
+  const match = rawNotes.match(/<!--__PAID_BY__:([\s\S]*?)-->/);
+  const paidBy = match && match[1] ? match[1].trim() : undefined;
+  const notes = rawNotes.replace(/\s*<!--__PAID_BY__:[\s\S]*?-->/g, '').trim() || undefined;
+  return { notes, paidBy };
+}
+
 // Linhas vindas do Supabase não são tipadas (cliente sem tipos gerados do banco)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export type CloudRow = any;
@@ -80,7 +95,7 @@ export interface PendingSets {
 // Recusas definitivas do banco (permissão/RLS, chave estrangeira, restrições e dados inválidos):
 // não adianta tentar de novo; a versão da nuvem prevalece na próxima sincronização.
 // Os códigos SQLSTATE têm 5 caracteres alfanuméricos (ex.: 22P02 = valor em formato inválido)
-export const PERMANENT_ERROR_CODE = /^(42501|23[0-9A-Z]{3}|22[0-9A-Z]{3})$/;
+export const PERMANENT_ERROR_CODE = /^(42501|42P01|23[0-9A-Z]{3}|22[0-9A-Z]{3})$/;
 
 // Chave estrangeira: o espaço (ou a recorrente) pode ainda não ter chegado à nuvem,
 // por exemplo um espaço criado sem internet. Tenta de novo algumas vezes antes de desistir.
@@ -112,7 +127,7 @@ export const transactionToRow = (t: Transaction, ctx: RowContext) => ({
   type: t.type,
   category: t.category,
   date: t.date,
-  notes: t.notes ?? null,
+  notes: encodeTransactionNotes(t.notes, t.paidBy),
   created_by: t.createdBy || ctx.userEmail || null,
   assigned_to: t.assignedTo || null,
   is_recurring_generated: !!t.isRecurringGenerated,
@@ -177,21 +192,37 @@ export const goalToRow = (g: Goal, ctx: RowContext) => ({
   updated_at: g.updatedAt || g.createdAt || new Date().toISOString(),
 });
 
-// ---------- Nuvem -> local ----------
-export const rowToTransaction = (row: CloudRow): Transaction => ({
-  id: row.id,
-  workspaceId: row.workspace_id,
-  title: row.title,
-  amount: parseFloat(row.amount),
-  type: row.type,
-  category: row.category,
-  date: row.date,
-  notes: row.notes ?? undefined,
-  createdBy: row.created_by ?? undefined,
-  assignedTo: row.assigned_to ?? undefined,
-  isRecurringGenerated: !!row.is_recurring_generated,
-  updatedAt: row.updated_at || row.created_at || row.date,
+export const goalTransactionToRow = (gt: GoalTransaction, ctx: RowContext) => ({
+  id: gt.id,
+  goal_id: gt.goalId,
+  workspace_id: mapWorkspaceId(gt.workspaceId, ctx.personalWsId),
+  amount: gt.amount,
+  type: gt.type,
+  date: gt.date,
+  created_by: gt.createdBy || ctx.userEmail || null,
+  notes: gt.notes ?? null,
+  updated_at: gt.updatedAt || gt.date || new Date().toISOString(),
 });
+
+// ---------- Nuvem -> local ----------
+export const rowToTransaction = (row: CloudRow): Transaction => {
+  const { notes, paidBy } = decodeTransactionNotes(row.notes);
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    title: row.title,
+    amount: parseFloat(row.amount),
+    type: row.type,
+    category: row.category,
+    date: row.date,
+    notes,
+    paidBy: row.paid_by || paidBy,
+    createdBy: row.created_by ?? undefined,
+    assignedTo: row.assigned_to ?? undefined,
+    isRecurringGenerated: !!row.is_recurring_generated,
+    updatedAt: row.updated_at || row.created_at || row.date,
+  };
+};
 
 export const rowToRecurring = (row: CloudRow): RecurringDebit => {
   const { userNotes, monthlyOverrides, excludedMonths } = decodeRecurringNotes(row.notes);
@@ -265,6 +296,18 @@ export const rowToGoal = (row: CloudRow): Goal => ({
   notes: row.notes ?? undefined,
   createdAt: row.created_at,
   updatedAt: row.updated_at || row.created_at,
+});
+
+export const rowToGoalTransaction = (row: CloudRow): GoalTransaction => ({
+  id: row.id,
+  goalId: row.goal_id,
+  workspaceId: row.workspace_id,
+  amount: parseFloat(row.amount),
+  type: row.type,
+  date: row.date,
+  createdBy: row.created_by ?? undefined,
+  notes: row.notes ?? undefined,
+  updatedAt: row.updated_at || row.created_at || row.date,
 });
 
 // ---------- Merge ----------
