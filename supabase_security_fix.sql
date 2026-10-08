@@ -10,9 +10,15 @@ BEGIN;
 
 -- ==============================================================================
 -- 1. FUNÇÕES AUXILIARES (usadas pelas políticas)
+-- Ficam no schema "private", que não é publicado na API do Supabase: as políticas
+-- conseguem usá-las, mas ninguém consegue chamá-las via /rest/v1/rpc.
 -- SECURITY DEFINER evita recursão de RLS ao consultar workspace_members.
 -- ==============================================================================
-CREATE OR REPLACE FUNCTION public.my_email()
+CREATE SCHEMA IF NOT EXISTS private;
+REVOKE ALL ON SCHEMA private FROM PUBLIC, anon;
+GRANT USAGE ON SCHEMA private TO authenticated;
+
+CREATE OR REPLACE FUNCTION private.my_email()
 RETURNS text
 LANGUAGE sql
 STABLE
@@ -21,7 +27,7 @@ AS $$
     SELECT lower(trim(coalesce(auth.jwt() ->> 'email', '')));
 $$;
 
-CREATE OR REPLACE FUNCTION public.ws_role(ws text)
+CREATE OR REPLACE FUNCTION private.ws_role(ws text)
 RETURNS text
 LANGUAGE sql
 STABLE
@@ -31,40 +37,40 @@ AS $$
     SELECT m.role
     FROM public.workspace_members m
     WHERE m.workspace_id = ws
-      AND public.my_email() <> ''
-      AND lower(trim(m.email)) = public.my_email()
+      AND private.my_email() <> ''
+      AND lower(trim(m.email)) = private.my_email()
     ORDER BY CASE m.role WHEN 'owner' THEN 1 WHEN 'editor' THEN 2 WHEN 'viewer' THEN 3 ELSE 4 END
     LIMIT 1;
 $$;
 
-CREATE OR REPLACE FUNCTION public.is_ws_member(ws text)
+CREATE OR REPLACE FUNCTION private.is_ws_member(ws text)
 RETURNS boolean
 LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $$
-    SELECT coalesce(public.ws_role(ws) IN ('owner', 'editor', 'viewer'), false);
+    SELECT coalesce(private.ws_role(ws) IN ('owner', 'editor', 'viewer'), false);
 $$;
 
-CREATE OR REPLACE FUNCTION public.can_edit_ws(ws text)
+CREATE OR REPLACE FUNCTION private.can_edit_ws(ws text)
 RETURNS boolean
 LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $$
-    SELECT coalesce(public.ws_role(ws) IN ('owner', 'editor'), false);
+    SELECT coalesce(private.ws_role(ws) IN ('owner', 'editor'), false);
 $$;
 
-CREATE OR REPLACE FUNCTION public.is_ws_owner(ws text)
+CREATE OR REPLACE FUNCTION private.is_ws_owner(ws text)
 RETURNS boolean
 LANGUAGE sql
 STABLE
 SET search_path = public, pg_temp
 AS $$
-    SELECT coalesce(public.ws_role(ws) = 'owner', false);
+    SELECT coalesce(private.ws_role(ws) = 'owner', false);
 $$;
 
-CREATE OR REPLACE FUNCTION public.ws_has_members(ws text)
+CREATE OR REPLACE FUNCTION private.ws_has_members(ws text)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -74,7 +80,7 @@ AS $$
     SELECT EXISTS (SELECT 1 FROM public.workspace_members m WHERE m.workspace_id = ws);
 $$;
 
-CREATE OR REPLACE FUNCTION public.ws_is_shared(ws text)
+CREATE OR REPLACE FUNCTION private.ws_is_shared(ws text)
 RETURNS boolean
 LANGUAGE sql
 STABLE
@@ -84,10 +90,16 @@ AS $$
     SELECT EXISTS (SELECT 1 FROM public.workspaces w WHERE w.id = ws AND w.type <> 'solo');
 $$;
 
+-- Só usuários logados executam (as políticas rodam com a permissão de quem consulta)
+REVOKE ALL ON ALL FUNCTIONS IN SCHEMA private FROM PUBLIC, anon;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA private TO authenticated;
+
 -- ==============================================================================
 -- 2. BUSCA DE ESPAÇO POR CÓDIGO DE CONVITE
 -- Quem ainda não é membro não enxerga a tabela workspaces; esta função devolve
 -- apenas id, nome e tipo do espaço dono do código informado.
+-- Fica em "public" de propósito (o app a chama via RPC). O aviso do Security
+-- Advisor "Signed-In Users Can Execute SECURITY DEFINER Function" para ela é esperado.
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.find_workspace_by_invite_code(p_code text)
 RETURNS TABLE (id text, name text, type text)
@@ -164,7 +176,7 @@ $$;
 -- 4.1 workspaces
 CREATE POLICY "ws_select_membros" ON public.workspaces
     FOR SELECT TO authenticated
-    USING (public.is_ws_member(id));
+    USING (private.is_ws_member(id));
 
 -- Qualquer usuário logado cria espaços, mas um id no formato pessoal (ws-<uuid>)
 -- só pode ser o do próprio usuário.
@@ -180,36 +192,36 @@ CREATE POLICY "ws_insert_logado" ON public.workspaces
 
 CREATE POLICY "ws_update_dono" ON public.workspaces
     FOR UPDATE TO authenticated
-    USING (public.is_ws_owner(id))
-    WITH CHECK (public.is_ws_owner(id));
+    USING (private.is_ws_owner(id))
+    WITH CHECK (private.is_ws_owner(id));
 
 CREATE POLICY "ws_delete_dono" ON public.workspaces
     FOR DELETE TO authenticated
-    USING (public.is_ws_owner(id));
+    USING (private.is_ws_owner(id));
 
 -- 4.2 workspace_members
 CREATE POLICY "mem_select" ON public.workspace_members
     FOR SELECT TO authenticated
-    USING (lower(trim(email)) = public.my_email() OR public.is_ws_member(workspace_id));
+    USING (lower(trim(email)) = private.my_email() OR private.is_ws_member(workspace_id));
 
 CREATE POLICY "mem_insert" ON public.workspace_members
     FOR INSERT TO authenticated
     WITH CHECK (
         -- Dono adiciona qualquer pessoa
-        public.is_ws_owner(workspace_id)
+        private.is_ws_owner(workspace_id)
         -- Usuário pede entrada em espaço compartilhado (fica pendente até aprovação)
         OR (
             role = 'pending'
-            AND lower(trim(email)) = public.my_email()
-            AND public.ws_is_shared(workspace_id)
+            AND lower(trim(email)) = private.my_email()
+            AND private.ws_is_shared(workspace_id)
         )
         -- Criador se registra como dono de um espaço ainda sem membros, ou do próprio espaço pessoal
         OR (
             role = 'owner'
-            AND public.my_email() <> ''
-            AND lower(trim(email)) = public.my_email()
+            AND private.my_email() <> ''
+            AND lower(trim(email)) = private.my_email()
             AND (
-                NOT public.ws_has_members(workspace_id)
+                NOT private.ws_has_members(workspace_id)
                 OR workspace_id = 'ws-' || auth.uid()::text
             )
         )
@@ -217,13 +229,13 @@ CREATE POLICY "mem_insert" ON public.workspace_members
 
 CREATE POLICY "mem_update_dono" ON public.workspace_members
     FOR UPDATE TO authenticated
-    USING (public.is_ws_owner(workspace_id))
-    WITH CHECK (public.is_ws_owner(workspace_id));
+    USING (private.is_ws_owner(workspace_id))
+    WITH CHECK (private.is_ws_owner(workspace_id));
 
 -- Dono remove membros; qualquer membro pode remover a si mesmo (sair do espaço)
 CREATE POLICY "mem_delete" ON public.workspace_members
     FOR DELETE TO authenticated
-    USING (public.is_ws_owner(workspace_id) OR lower(trim(email)) = public.my_email());
+    USING (private.is_ws_owner(workspace_id) OR lower(trim(email)) = private.my_email());
 
 -- 4.3 Tabelas de dados: membros leem; owner/editor escrevem
 DO $$
@@ -233,16 +245,16 @@ BEGIN
     FOREACH t IN ARRAY ARRAY['transactions', 'recurrings', 'recurring_month_records', 'budgets', 'goals']
     LOOP
         EXECUTE format(
-            'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (public.is_ws_member(workspace_id))',
+            'CREATE POLICY %I ON public.%I FOR SELECT TO authenticated USING (private.is_ws_member(workspace_id))',
             t || '_select_membros', t);
         EXECUTE format(
-            'CREATE POLICY %I ON public.%I FOR INSERT TO authenticated WITH CHECK (public.can_edit_ws(workspace_id))',
+            'CREATE POLICY %I ON public.%I FOR INSERT TO authenticated WITH CHECK (private.can_edit_ws(workspace_id))',
             t || '_insert_editores', t);
         EXECUTE format(
-            'CREATE POLICY %I ON public.%I FOR UPDATE TO authenticated USING (public.can_edit_ws(workspace_id)) WITH CHECK (public.can_edit_ws(workspace_id))',
+            'CREATE POLICY %I ON public.%I FOR UPDATE TO authenticated USING (private.can_edit_ws(workspace_id)) WITH CHECK (private.can_edit_ws(workspace_id))',
             t || '_update_editores', t);
         EXECUTE format(
-            'CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (public.can_edit_ws(workspace_id))',
+            'CREATE POLICY %I ON public.%I FOR DELETE TO authenticated USING (private.can_edit_ws(workspace_id))',
             t || '_delete_editores', t);
     END LOOP;
 END;
@@ -253,6 +265,8 @@ $$;
 -- - Apaga apenas o espaço pessoal do próprio usuário (nunca o 'ws-solo' legado).
 -- - Espaços compartilhados em que ele é o único dono: o membro aprovado mais
 --   antigo vira dono; sem outros membros, o espaço e seus dados são apagados.
+-- Fica em "public" de propósito (o app a chama via RPC). O aviso do Security
+-- Advisor "Signed-In Users Can Execute SECURITY DEFINER Function" para ela é esperado.
 -- ==============================================================================
 CREATE OR REPLACE FUNCTION public.delete_user_account()
 RETURNS void
@@ -337,10 +351,23 @@ $$;
 REVOKE ALL ON FUNCTION public.delete_user_account() FROM PUBLIC, anon;
 GRANT EXECUTE ON FUNCTION public.delete_user_account() TO authenticated;
 
+-- ==============================================================================
+-- 6. LIMPEZA: versões antigas das funções auxiliares em "public"
+-- (publicadas na API e apontadas pelo Security Advisor). Nenhuma política
+-- depende mais delas a partir deste ponto.
+-- ==============================================================================
+DROP FUNCTION IF EXISTS public.is_ws_member(text);
+DROP FUNCTION IF EXISTS public.can_edit_ws(text);
+DROP FUNCTION IF EXISTS public.is_ws_owner(text);
+DROP FUNCTION IF EXISTS public.ws_has_members(text);
+DROP FUNCTION IF EXISTS public.ws_is_shared(text);
+DROP FUNCTION IF EXISTS public.ws_role(text);
+DROP FUNCTION IF EXISTS public.my_email();
+
 COMMIT;
 
 -- ==============================================================================
--- 6. CONFERÊNCIA: espaços que continuam sem dono (ficarão invisíveis no app)
+-- 7. CONFERÊNCIA: espaços que continuam sem dono (ficarão invisíveis no app)
 -- Se esta consulta retornar linhas, envie o resultado para análise.
 -- ==============================================================================
 SELECT w.id, w.name, w.type, w.created_at

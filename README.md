@@ -143,14 +143,17 @@ O aplicativo pode operar offline ou sincronizado com o Supabase.
 
 1. Acesse seu painel em [supabase.com](https://supabase.com/) e crie um novo projeto PostgreSQL.
 2. No menu lateral, acesse **SQL Editor** ➔ **New Query**.
-3. Copie todo o conteúdo do arquivo [`supabase_schema.sql`](file:///C:/Users/alcidesdiogenes/Desktop/Projetos/Financas%20android/supabase_schema.sql) deste repositório e cole no editor.
-4. Clique em **Run** para criar todas as tabelas, índices e triggers de auditoria:
-   * `workspaces` e `workspace_members`
-   * `workspace_join_requests` (aprovação obrigatória)
+3. Copie todo o conteúdo de [`supabase_schema.sql`](./supabase_schema.sql), cole no editor e clique em **Run**. Ele cria as tabelas e os índices:
+   * `workspaces` e `workspace_members` (membros por e-mail, com papéis `owner`, `editor`, `viewer` e `pending`)
    * `transactions`
    * `recurrings` e `recurring_month_records`
    * `budgets` e `goals`
-5. No app, em **Ajustes ➔ Nuvem & Supabase**, você pode inserir a URL e a Anon Key do seu projeto, ou utilizar as credenciais padrão configuradas em `src/services/supabase/supabaseClient.ts`.
+4. **Obrigatório:** em uma nova query, rode também [`supabase_security_fix.sql`](./supabase_security_fix.sql). Ele cria as regras de acesso (RLS) por membro do espaço, a busca por código de convite e a função de exclusão de conta. Sem ele, o RLS fica ligado sem nenhuma regra e o app não consegue ler nem gravar dados.
+5. Em **Authentication ➔ Sign In / Providers**, mantenha **Confirm email** ligado: as regras de acesso identificam o usuário pelo e-mail.
+
+> O endereço e a chave pública do projeto ficam fixos em `src/services/supabase/supabaseClient.ts`. Para usar outro projeto Supabase, altere as constantes `DEFAULT_SUPABASE_URL` e `DEFAULT_SUPABASE_ANON_KEY` e publique uma nova versão do app.
+>
+> Bancos criados antes de outubro/2026 devem rodar também [`supabase_sync_fix.sql`](./supabase_sync_fix.sql), que acrescenta as colunas sincronizadas a partir dessa versão. Em um banco novo, o `supabase_schema.sql` já as inclui.
 
 ---
 

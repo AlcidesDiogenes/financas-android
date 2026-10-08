@@ -8,19 +8,20 @@ on:
 jobs:
   update:
     name: EAS Update (Nuvem)
-    runs-on: ubuntu-latest
+    # Versao fixa: ubuntu-latest passa para o Ubuntu 26 em 19/10/2026
+    runs-on: ubuntu-24.04
     steps:
       - name: 1. Baixar codigo do repositorio
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 2. Configurar Node.js 22
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
       - name: 3. Configurar EAS CLI
-        uses: expo/expo-github-action@v8
+        uses: expo/expo-github-action@v9
         with:
           eas-version: latest
           token: ${{ secrets.EXPO_TOKEN }}
