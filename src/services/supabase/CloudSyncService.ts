@@ -138,7 +138,7 @@ export class CloudSyncService {
         const upserts = entries.filter((e) => e.table === table && e.op === 'upsert');
         if (upserts.length === 0) continue;
 
-        const localRows = await this.buildLocalRows(table, ctx);
+        const localRows = await this.buildLocalRows(table, ctx, new Set(upserts.map((e) => e.id)));
         const toSend: { entry: SyncQueueEntry; row: Record<string, unknown> }[] = [];
         for (const entry of upserts) {
           const row = localRows.get(entry.id);
@@ -184,23 +184,29 @@ export class CloudSyncService {
     });
   }
 
+  // Converte para o formato do banco apenas os itens que estão na fila (e não a tabela inteira)
   private static async buildLocalRows(
     table: SyncTable,
-    ctx: RowContext
+    ctx: RowContext,
+    ids: Set<string>
   ): Promise<Map<string, Record<string, unknown>>> {
+    const pick = <T extends { id: string }>(items: T[], toRow: (item: T, c: RowContext) => Record<string, unknown>) =>
+      new Map(items.filter((item) => ids.has(item.id)).map((item) => [item.id, toRow(item, ctx)]));
+
     switch (table) {
       case 'transactions':
-        return new Map((await TransactionRepository.getAll()).map((t) => [t.id, transactionToRow(t, ctx)]));
+        return pick(await TransactionRepository.getAll(), transactionToRow);
       case 'recurrings':
-        return new Map((await RecurringRepository.getAll()).map((r) => [r.id, recurringToRow(r, ctx)]));
+        return pick(await RecurringRepository.getAll(), recurringToRow);
       case 'recurring_month_records':
-        return new Map((await RecurringMonthRepository.getAll()).map((m) => [m.id, monthRecordToRow(m, ctx)]));
+        return pick(await RecurringMonthRepository.getAll(), monthRecordToRow);
       case 'budgets':
-        return new Map((await BudgetRepository.getAll()).map((b) => [b.id, budgetToRow(b, ctx)]));
+        return pick(await BudgetRepository.getAll(), budgetToRow);
       case 'goals':
-        return new Map((await GoalRepository.getAll()).map((g) => [g.id, goalToRow(g, ctx)]));
+        return pick(await GoalRepository.getAll(), goalToRow);
     }
   }
+
   // Envia em lotes; se um lote for recusado pelo banco, isola linha a linha
   // para que uma única linha inválida não derrube as demais.
   private static async pushRows(
