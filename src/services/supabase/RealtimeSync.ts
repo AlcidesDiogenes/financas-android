@@ -4,7 +4,14 @@ import { SupabaseService } from './supabaseClient';
 // usuário) e avisa o app para sincronizar. As regras de acesso (RLS) do banco valem aqui:
 // cada usuário só recebe as mudanças dos espaços de que participa.
 
-const DATA_TABLES = ['transactions', 'recurrings', 'recurring_month_records', 'budgets', 'goals'] as const;
+const DATA_TABLES = [
+  'transactions',
+  'recurrings',
+  'recurring_month_records',
+  'budgets',
+  'goals',
+  'goal_transactions',
+] as const;
 const WORKSPACE_TABLES = ['workspaces', 'workspace_members'] as const;
 
 // Espera para agrupar vários avisos seguidos numa única sincronização

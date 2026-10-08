@@ -18,6 +18,9 @@ export class SupabaseService {
             autoRefreshToken: true,
             persistSession: true,
             detectSessionInUrl: false,
+            // PKCE: o link do e-mail traz só um código, que só vira sessão no aparelho que
+            // pediu o e-mail (ele guarda o segredo). Um link gerado por outra pessoa não loga aqui.
+            flowType: 'pkce',
           },
         })
       );

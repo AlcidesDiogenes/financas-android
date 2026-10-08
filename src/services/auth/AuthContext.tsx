@@ -4,6 +4,7 @@ import * as Linking from 'expo-linking';
 import { SupabaseService } from '../supabase/supabaseClient';
 import { CloudSyncService } from '../supabase/CloudSyncService';
 import { SyncQueue } from '../supabase/SyncQueue';
+import { parseAuthDeepLink } from './authDeepLink';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { TransactionRepository } from '../../modules/transactions/repository';
 import { RecurringRepository } from '../../modules/recurrings/repository';
@@ -102,113 +103,71 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     };
   }, []);
 
-  const extractUrlParams = (url: string): Record<string, string> => {
-    const params: Record<string, string> = {};
-
-    const extractFromPart = (part: string) => {
-      part.split('&').forEach((item) => {
-        const eqIdx = item.indexOf('=');
-        if (eqIdx !== -1) {
-          const key = decodeURIComponent(item.substring(0, eqIdx).trim());
-          const val = decodeURIComponent(item.substring(eqIdx + 1).trim());
-          if (key) params[key] = val;
-        }
-      });
-    };
-
-    const queryIndex = url.indexOf('?');
-    if (queryIndex !== -1) {
-      const queryPart = url.substring(queryIndex + 1).split('#')[0];
-      extractFromPart(queryPart);
-    }
-    const hashIndex = url.indexOf('#');
-    if (hashIndex !== -1) {
-      const hashPart = url.substring(hashIndex + 1);
-      extractFromPart(hashPart);
-    }
-    return params;
-  };
-
   const handleIncomingDeepLink = async (url: string) => {
     try {
-      const client = await SupabaseService.getClient();
-      const params = extractUrlParams(url);
-      const isRecovery =
-        params.type === 'recovery' ||
-        url.toLowerCase().includes('type=recovery') ||
-        url.toLowerCase().includes('reset-password');
+      const link = parseAuthDeepLink(url);
+      if (link.kind === 'none') return;
 
-      // Se o link contiver parâmetros de erro do Supabase (ex: link expirado ou acesso negado)
-      if (params.error || params.error_description) {
-        const desc = params.error_description
-          ? decodeURIComponent(params.error_description).replace(/\+/g, ' ')
-          : 'O link acessado é inválido ou já expirou.';
+      const showInvalidLink = (isRecovery: boolean, detail?: string) => {
         Alert.alert(
           'Link Expirado ou Inválido ⚠️',
-          `${desc}\n\nPor favor, solicite um novo link de redefinição de senha.`,
+          `${detail || 'Este link expirou, já foi usado ou foi aberto em outro aparelho.'}\n\nPor favor, solicite um novo link ${
+            isRecovery ? 'de redefinição de senha' : 'de confirmação'
+          } pelo aplicativo, neste mesmo aparelho.`,
+          [{ text: 'Entendido' }]
+        );
+      };
+
+      if (link.kind === 'error') {
+        showInvalidLink(link.isRecovery, link.description);
+        return;
+      }
+
+      const client = await SupabaseService.getClient();
+
+      // Com alguém já conectado, o link nunca troca a conta (evita entrar sem perceber na
+      // conta de outra pessoa, misturando os dados locais).
+      const { data: { session: current } } = await client.auth.getSession();
+      if (current?.user) {
+        Alert.alert(
+          'Você já está conectado',
+          `Você já está conectado como ${current.user.email || 'outro usuário'}. Para usar este link, saia da conta primeiro.${
+            link.isRecovery ? '\n\nPara trocar a senha estando conectado, use Ajustes.' : ''
+          }`,
           [{ text: 'Entendido' }]
         );
         return;
       }
 
-      // 1. Processar PKCE code se presente
-      if (params.code) {
-        const { error: codeErr } = await client.auth.exchangeCodeForSession(
-          params.code,
-          params.flow_id ? { flowId: params.flow_id } : undefined
-        );
-        if (codeErr) {
-          console.warn('Erro ao trocar code por sessão:', codeErr);
-        }
-      } else if (params.access_token) {
-        // 2. Processar tokens no hash (#access_token=...)
-        const { error: tokenErr } = await client.auth.setSession({
-          access_token: params.access_token,
-          refresh_token: params.refresh_token || '',
-        });
-        if (tokenErr) {
-          console.warn('Erro ao definir sessão com access_token:', tokenErr);
-        }
-      } else if (params.token_hash) {
-        // 3. Processar token_hash OTP se presente
-        const { error: otpErr } = await client.auth.verifyOtp({
-          token_hash: params.token_hash,
-          type: (params.type as any) || (isRecovery ? 'recovery' : 'email'),
-        });
-        if (otpErr) {
-          console.warn('Erro ao verificar OTP:', otpErr);
-        }
+      if (link.kind === 'unsupported') {
+        showInvalidLink(link.isRecovery, 'Este link foi gerado numa versão anterior do aplicativo e não é mais aceito.');
+        return;
       }
 
-      // Verifica a sessão resultante
-      const { data: { session } } = await client.auth.getSession();
-      if (session?.user) {
-        const storedProfile = await AsyncStorage.getItem(LOCAL_PROFILE_KEY);
-        const name = storedProfile
-          ? JSON.parse(storedProfile).name
-          : session.user.user_metadata?.name || 'Usuário';
-        const profile: AuthUser = {
-          id: session.user.id,
-          email: session.user.email || '',
-          name,
-        };
-        setUser(profile);
-        setIsGuest(false);
-        await AsyncStorage.removeItem(GUEST_MODE_KEY);
-        await AsyncStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(profile));
+      const { data, error } = await client.auth.exchangeCodeForSession(link.code);
+      const sessionUser = data?.session?.user;
+      if (error || !sessionUser) {
+        console.warn('Erro ao trocar code por sessão:', error);
+        showInvalidLink(link.isRecovery);
+        return;
+      }
 
-        if (isRecovery) {
-          setIsPasswordRecovery(true);
-        } else {
-          Alert.alert('Conta Confirmada! 🎉', 'Seu e-mail foi verificado com sucesso. Bem-vindo!');
-        }
-      } else if (isRecovery) {
-        // Sessão não foi estabelecida a partir do link
-        Alert.alert(
-          'Link Expirado ou Inválido ⚠️',
-          'Não foi possível validar seu link de recuperação de senha (ele pode ter expirado ou já ter sido utilizado).\n\nPor favor, solicite um novo link de redefinição no aplicativo.',
-          [{ text: 'Entendido' }]
-        );
+      // Mesma regra do login: começa com a base local limpa para receber os dados da conta
+      await clearLocalUserData();
+      const profile: AuthUser = {
+        id: sessionUser.id,
+        email: sessionUser.email || '',
+        name: sessionUser.user_metadata?.name || 'Usuário',
+      };
+      setUser(profile);
+      setIsGuest(false);
+      await AsyncStorage.removeItem(GUEST_MODE_KEY);
+      await AsyncStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(profile));
+
+      if (link.isRecovery) {
+        setIsPasswordRecovery(true);
+      } else {
+        Alert.alert('Conta Confirmada! 🎉', 'Seu e-mail foi verificado com sucesso. Bem-vindo!');
       }
     } catch (e) {
       console.warn('Erro ao processar deep link de autenticação:', e);
