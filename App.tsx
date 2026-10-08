@@ -15,6 +15,7 @@ import { AuthScreen } from './src/screens/AuthScreen';
 import { OnboardingScreen, ONBOARDING_COMPLETED_KEY } from './src/screens/OnboardingScreen';
 
 import { WhatsNewModal } from './src/core/components/WhatsNewModal';
+import { ResetPasswordModal } from './src/screens/settings/components/ResetPasswordModal';
 import { ErrorBoundary } from './src/core/components/ErrorBoundary';
 import { APP_VERSION_CONFIG, RELEASE_HISTORY, ReleaseNote } from './src/core/version';
 
@@ -64,15 +65,8 @@ const MainAppContent: React.FC = () => {
         // Versão mudou! Usuário acabou de atualizar o app.
         setPreviousVersion(lastSeen);
 
-        // Filtra todas as notas entre a versão antiga e a nova
-        const lastSeenIdx = RELEASE_HISTORY.findIndex((r) => r.version === lastSeen);
-        let notesToShow: ReleaseNote[] = [];
-        if (lastSeenIdx > 0) {
-          notesToShow = RELEASE_HISTORY.slice(0, lastSeenIdx);
-        } else {
-          // Se a versão antiga for mais antiga que o histórico ou não encontrada, mostra a mais recente
-          notesToShow = [RELEASE_HISTORY[0]];
-        }
+        // Regra de consolidação: considera apenas uma única nota consolidada (a mais recente instalada)
+        const notesToShow = [RELEASE_HISTORY[0]];
 
         setRelevantReleaseNotes(notesToShow);
         setShowWhatsNew(true);
@@ -124,27 +118,33 @@ const MainAppContent: React.FC = () => {
 
 const ThemedApp: React.FC = () => {
   const { isDark } = useTheme();
-  const { isAuthenticated, isLoading } = useAuth();
+  const { isAuthenticated, isLoading, isPasswordRecovery, setIsPasswordRecovery } = useAuth();
 
   if (isLoading) {
     return null;
   }
 
-  if (!isAuthenticated) {
-    return (
-      <>
-        <StatusBar style={isDark ? 'light' : 'dark'} />
-        <AuthScreen />
-      </>
-    );
-  }
-
   return (
-    <WorkspaceProvider>
-      <FinanceProvider>
-        <MainAppContent />
-      </FinanceProvider>
-    </WorkspaceProvider>
+    <>
+      {!isAuthenticated ? (
+        <>
+          <StatusBar style={isDark ? 'light' : 'dark'} />
+          <AuthScreen />
+        </>
+      ) : (
+        <WorkspaceProvider>
+          <FinanceProvider>
+            <MainAppContent />
+          </FinanceProvider>
+        </WorkspaceProvider>
+      )}
+
+      {/* Modal Global de Redefinição de Senha via Link Seguro */}
+      <ResetPasswordModal
+        visible={isPasswordRecovery}
+        onClose={() => setIsPasswordRecovery(false)}
+      />
+    </>
   );
 };
 

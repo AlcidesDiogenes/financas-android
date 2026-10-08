@@ -27,6 +27,9 @@ interface AuthContextType {
   resendVerificationEmail: (email: string) => Promise<{ success: boolean; error?: string }>;
   resetPassword: (email: string) => Promise<{ success: boolean; error?: string }>;
   updatePassword: (currentPassword: string, newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  setNewPassword: (newPassword: string) => Promise<{ success: boolean; error?: string }>;
+  isPasswordRecovery: boolean;
+  setIsPasswordRecovery: (val: boolean) => void;
   updateProfile: (newName: string) => Promise<{ success: boolean; error?: string }>;
   signOut: (options?: { force?: boolean }) => Promise<{ success: boolean; pendingCount?: number }>;
   deleteAccount: () => Promise<{ success: boolean; error?: string }>;
@@ -60,6 +63,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   const [user, setUser] = useState<AuthUser | null>(null);
   const [isLoading, setIsLoading] = useState(true);
   const [isGuest, setIsGuest] = useState(false);
+  const [isPasswordRecovery, setIsPasswordRecovery] = useState(false);
 
   useEffect(() => {
     checkInitialSession();
@@ -71,40 +75,102 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       }
     });
 
+    // Listener de eventos do Supabase Auth (ex: PASSWORD_RECOVERY)
+    let authSubscription: any = null;
+    SupabaseService.getClient().then((client) => {
+      const { data } = client.auth.onAuthStateChange(async (event, session) => {
+        if (event === 'PASSWORD_RECOVERY') {
+          if (session?.user) {
+            setUser({
+              id: session.user.id,
+              email: session.user.email || '',
+              name: session.user.user_metadata?.name || 'Usuário',
+            });
+            setIsGuest(false);
+          }
+          setIsPasswordRecovery(true);
+        }
+      });
+      authSubscription = data.subscription;
+    });
+
     return () => {
       subscription.remove();
+      if (authSubscription) {
+        authSubscription.unsubscribe();
+      }
     };
   }, []);
 
+  const extractUrlParams = (url: string): Record<string, string> => {
+    const params: Record<string, string> = {};
+    const queryIndex = url.indexOf('?');
+    if (queryIndex !== -1) {
+      const queryPart = url.substring(queryIndex + 1).split('#')[0];
+      queryPart.split('&').forEach((part) => {
+        const [k, v] = part.split('=');
+        if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
+      });
+    }
+    const hashIndex = url.indexOf('#');
+    if (hashIndex !== -1) {
+      const hashPart = url.substring(hashIndex + 1);
+      hashPart.split('&').forEach((part) => {
+        const [k, v] = part.split('=');
+        if (k && v) params[decodeURIComponent(k)] = decodeURIComponent(v);
+      });
+    }
+    return params;
+  };
+
   const handleIncomingDeepLink = async (url: string) => {
     try {
-      // O Supabase anexa tokens após #access_token=... ou ?code=...
       const client = await SupabaseService.getClient();
+      const params = extractUrlParams(url);
+      const isRecovery =
+        params.type === 'recovery' ||
+        url.toLowerCase().includes('type=recovery') ||
+        url.toLowerCase().includes('reset-password');
 
-      // Se o link contiver hash com tokens (#access_token=...)
-      if (url.includes('#access_token=') || url.includes('?code=')) {
-        // Obter os parâmetros da URL
-        const parsed = Linking.parse(url);
-        
-        // Verifica se há sessão atualizada
-        const { data: { session } } = await client.auth.getSession();
-        if (session?.user) {
-          const storedProfile = await AsyncStorage.getItem(LOCAL_PROFILE_KEY);
-          const name = storedProfile ? JSON.parse(storedProfile).name : session.user.user_metadata?.name || 'Usuário';
-          const profile: AuthUser = {
-            id: session.user.id,
-            email: session.user.email || '',
-            name,
-          };
-          setUser(profile);
-          setIsGuest(false);
-          await AsyncStorage.removeItem(GUEST_MODE_KEY);
-          await AsyncStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(profile));
+      // 1. Processar PKCE code se presente
+      if (params.code) {
+        await client.auth.exchangeCodeForSession(params.code);
+      } else if (params.access_token && params.refresh_token) {
+        // 2. Processar tokens no hash (#access_token=...)
+        await client.auth.setSession({
+          access_token: params.access_token,
+          refresh_token: params.refresh_token,
+        });
+      }
 
+      // Verifica a sessão resultante
+      const { data: { session } } = await client.auth.getSession();
+      if (session?.user) {
+        const storedProfile = await AsyncStorage.getItem(LOCAL_PROFILE_KEY);
+        const name = storedProfile
+          ? JSON.parse(storedProfile).name
+          : session.user.user_metadata?.name || 'Usuário';
+        const profile: AuthUser = {
+          id: session.user.id,
+          email: session.user.email || '',
+          name,
+        };
+        setUser(profile);
+        setIsGuest(false);
+        await AsyncStorage.removeItem(GUEST_MODE_KEY);
+        await AsyncStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(profile));
+
+        if (isRecovery) {
+          setIsPasswordRecovery(true);
+        } else {
           Alert.alert('Conta Confirmada! 🎉', 'Seu e-mail foi verificado com sucesso. Bem-vindo!');
         }
+      } else if (isRecovery) {
+        setIsPasswordRecovery(true);
       }
-    } catch {}
+    } catch (e) {
+      console.warn('Erro ao processar deep link de autenticação:', e);
+    }
   };
 
   const checkInitialSession = async () => {
@@ -296,6 +362,37 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     }
   };
 
+  const setNewPassword = async (
+    newPassword: string
+  ): Promise<{ success: boolean; error?: string }> => {
+    try {
+      const client = await SupabaseService.getClient();
+      const { data, error } = await client.auth.updateUser({ password: newPassword });
+      if (error) {
+        return { success: false, error: formatAuthError(error.message) };
+      }
+      if (data?.user) {
+        const storedProfile = await AsyncStorage.getItem(LOCAL_PROFILE_KEY);
+        const name = storedProfile
+          ? JSON.parse(storedProfile).name
+          : data.user.user_metadata?.name || 'Usuário';
+        const profile: AuthUser = {
+          id: data.user.id,
+          email: data.user.email || '',
+          name,
+        };
+        setUser(profile);
+        setIsGuest(false);
+        await AsyncStorage.removeItem(GUEST_MODE_KEY);
+        await AsyncStorage.setItem(LOCAL_PROFILE_KEY, JSON.stringify(profile));
+      }
+      setIsPasswordRecovery(false);
+      return { success: true };
+    } catch (e: any) {
+      return { success: false, error: formatAuthError(e?.message) };
+    }
+  };
+
   const updateProfile = async (
     newName: string
   ): Promise<{ success: boolean; error?: string }> => {
@@ -469,6 +566,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         resendVerificationEmail,
         resetPassword,
         updatePassword,
+        setNewPassword,
+        isPasswordRecovery,
+        setIsPasswordRecovery,
         updateProfile,
         signOut,
         deleteAccount,

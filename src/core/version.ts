@@ -1,7 +1,8 @@
 // Controlador Central de Versão e Notas de Atualização (Changelog)
+// Padrão Semantic Versioning (SemVer): MAJOR.MINOR.PATCH (ex: 1.1.0)
 export interface ReleaseNote {
   version: string;
-  buildNumber: number;
+  buildNumber?: number;
   date: string;
   title: string;
   highlight: string;
@@ -13,21 +14,58 @@ export interface ReleaseNote {
 }
 
 export const APP_VERSION_CONFIG = {
-  version: '1.0.0',
-  buildNumber: 3,
-  releaseDate: '06/10/2026',
+  version: '1.1.0',
+  releaseDate: '08/10/2026',
   environment: 'production',
   platform: 'Android',
 };
 
 export const getAppVersionString = (): string => {
-  return `Versão ${APP_VERSION_CONFIG.version} (Build ${APP_VERSION_CONFIG.buildNumber})`;
+  return `Versão ${APP_VERSION_CONFIG.version}`;
 };
 
 export const RELEASE_HISTORY: ReleaseNote[] = [
   {
+    version: '1.1.0',
+    date: '08/10/2026',
+    title: 'Melhorias em Metas, Recorrências e Recuperação de Senha 🎯',
+    highlight:
+      'Nova experiência de metas com histórico de movimentações, prazo flexível em mês/ano, identificação de quem deu baixa na conta no extrato e recuperação de senha direto no app.',
+    changes: [
+      {
+        icon: 'time-outline',
+        title: 'Histórico de Aportes e Resgates de Metas',
+        description:
+          'Toque no card de qualquer meta para visualizar o histórico cronológico de todos os depósitos e resgates com valores, data/hora e autor.',
+      },
+      {
+        icon: 'calendar-outline',
+        title: 'Prazos de Metas em Mês/Ano Bidirecional',
+        description:
+          'Defina o prazo de conclusão digitando a quantidade de meses ou escolhendo o mês e ano final, com cálculo automático e sugestão mensal de economia.',
+      },
+      {
+        icon: 'person-circle-outline',
+        title: 'Quem Deu Baixa na Conta (Extrato)',
+        description:
+          'Veja no extrato quem confirmou o pagamento ou recebimento ("✓ Pago por [Nome]"), mantendo o card de contas fixas limpo.',
+      },
+      {
+        icon: 'key-outline',
+        title: 'Recuperação de Senha Integrada',
+        description:
+          'Ao clicar no link de recuperação de senha enviado por e-mail, o aplicativo abre imediatamente a tela para cadastrar sua nova senha com segurança.',
+      },
+      {
+        icon: 'cloud-download-outline',
+        title: 'Atualizações Online Centralizadas no Modal',
+        description:
+          'A busca, progresso de download, aviso de manter tela ligada e mensagens de conexão agora acontecem 100% dentro do modal elegante.',
+      },
+    ],
+  },
+  {
     version: '1.0.0',
-    buildNumber: 3,
     date: '06/10/2026',
     title: 'Aprovação Prévia de Entrada em Espaços Compartilhados 🛡️',
     highlight:
@@ -55,7 +93,6 @@ export const RELEASE_HISTORY: ReleaseNote[] = [
   },
   {
     version: '1.0.0',
-    buildNumber: 2,
     date: '06/10/2026',
     title: 'Isolamento Estrito de Contas & Privacidade Multi-Tenant 🔒',
     highlight:
@@ -83,7 +120,6 @@ export const RELEASE_HISTORY: ReleaseNote[] = [
   },
   {
     version: '1.0.0',
-    buildNumber: 1,
     date: '06/10/2026',
     title: 'Lançamento Oficial Finanças 1.0 🚀',
     highlight:
