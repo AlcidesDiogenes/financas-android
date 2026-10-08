@@ -13,6 +13,7 @@ import { BudgetRepository } from './budgets/repository';
 import { Goal, GoalProgress } from './goals/types';
 import { GoalRepository } from './goals/repository';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
+import { subscribeToCloudChanges } from '../services/supabase/RealtimeSync';
 import { getCurrentMonthYear } from '../core/utils/date';
 
 export type BalanceMode = 'realized' | 'projected';
@@ -72,7 +73,7 @@ const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const { activeWorkspace } = useWorkspace();
+  const { activeWorkspace, refreshWorkspaces } = useWorkspace();
   const currentPeriod = useMemo(() => getCurrentMonthYear(), []);
 
   const [selectedMonth, setSelectedMonth] = useState<number>(currentPeriod.month);
@@ -171,6 +172,32 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     });
     return () => subscription.remove();
   }, []);
+
+  // Tempo real: mudanças de outros membros/aparelhos disparam uma sincronização
+  const refreshWorkspacesRef = useRef(refreshWorkspaces);
+  refreshWorkspacesRef.current = refreshWorkspaces;
+  useEffect(() => {
+    if (!user?.id) return;
+    let unsubscribe: (() => void) | null = null;
+    let cancelled = false;
+    subscribeToCloudChanges(user.id, {
+      onDataChanged: () => {
+        reloadAllRef.current().catch(() => {});
+      },
+      onWorkspacesChanged: () => {
+        refreshWorkspacesRef.current().catch(() => {});
+      },
+    })
+      .then((stop) => {
+        if (cancelled) stop();
+        else unsubscribe = stop;
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+      unsubscribe?.();
+    };
+  }, [user?.id]);
 
   // Filter by active workspace
   const workspaceTransactions = useMemo(

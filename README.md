@@ -150,6 +150,7 @@ O aplicativo pode operar offline ou sincronizado com o Supabase.
    * `budgets` e `goals`
 4. **Obrigatório:** em uma nova query, rode também [`supabase_security_fix.sql`](./supabase_security_fix.sql). Ele cria as regras de acesso (RLS) por membro do espaço, a busca por código de convite e a função de exclusão de conta. Sem ele, o RLS fica ligado sem nenhuma regra e o app não consegue ler nem gravar dados.
 5. Em **Authentication ➔ Sign In / Providers**, mantenha **Confirm email** ligado: as regras de acesso identificam o usuário pelo e-mail.
+6. Para o tempo real entre celulares, rode [`supabase_realtime.sql`](./supabase_realtime.sql), que coloca as tabelas na publicação do Realtime. O `supabase_schema.sql` já faz isso num banco novo; o script serve para conferir ou corrigir um banco existente.
 
 > O endereço e a chave pública do projeto ficam fixos em `src/services/supabase/supabaseClient.ts`. Para usar outro projeto Supabase, altere as constantes `DEFAULT_SUPABASE_URL` e `DEFAULT_SUPABASE_ANON_KEY` e publique uma nova versão do app.
 >
