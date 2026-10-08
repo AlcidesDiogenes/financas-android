@@ -15,6 +15,7 @@ import { GoalRepository } from './goals/repository';
 import { CloudSyncService } from '../services/supabase/CloudSyncService';
 import { subscribeToCloudChanges } from '../services/supabase/RealtimeSync';
 import { getCurrentMonthYear } from '../core/utils/date';
+import { RollbackStep, runWithRollback } from '../core/utils/runWithRollback';
 
 export type BalanceMode = 'realized' | 'projected';
 
@@ -531,8 +532,6 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         endDate: prevCompFormatted,
         updatedAt: new Date().toISOString(),
       };
-      await RecurringRepository.update(updatedOldRec);
-      await CloudSyncService.autoUpsertRecurring(updatedOldRec);
 
       // A nova conta com o novo valor começa na competência selecionada
       const newRec: RecurringDebit = {
@@ -544,43 +543,74 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
       };
-      await RecurringRepository.add(newRec);
-      await CloudSyncService.autoUpsertRecurring(newRec);
 
-      // Se a conta atual já tinha sido paga neste mês, vincula o monthRecord à nova conta
+      // Se a conta atual já tinha registro neste mês, ele passa para a nova conta
       const existing = allRecurringMonthRecords.find(
         (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
       );
-      if (existing) {
-        const newMonthRecord: RecurringMonthRecord = {
-          ...existing,
-          id: `${newRec.id}-${selectedYear}-${selectedMonth}`,
-          recurringId: newRec.id,
-          amount: newAmount,
-          updatedAt: new Date().toISOString(),
-        };
-        // O registro do mês passa da conta antiga (encerrada no mês anterior) para a nova
-        await RecurringMonthRepository.upsert(newMonthRecord);
-        const updatedMonthRecords = await RecurringMonthRepository.deleteByIds([existing.id]);
-        setAllRecurringMonthRecords(updatedMonthRecords);
+      const newMonthRecord: RecurringMonthRecord | null = existing
+        ? {
+            ...existing,
+            id: `${newRec.id}-${selectedYear}-${selectedMonth}`,
+            recurringId: newRec.id,
+            amount: newAmount,
+            updatedAt: new Date().toISOString(),
+          }
+        : null;
+      const linkedTx =
+        existing?.isPaid && existing.transactionId
+          ? allTransactions.find((t) => t.id === existing.transactionId)
+          : undefined;
+      const updatedTx = linkedTx ? { ...linkedTx, amount: newAmount } : null;
+
+      // Gravações locais com desfazer: se qualquer etapa falhar, nada fica pela metade
+      // (a conta nunca some nem fica duplicada). A conta antiga é encerrada por último.
+      const steps: RollbackStep[] = [
+        { run: () => RecurringRepository.add(newRec), undo: () => RecurringRepository.delete(newRec.id) },
+      ];
+      if (existing && newMonthRecord) {
+        steps.push(
+          {
+            run: () => RecurringMonthRepository.upsert(newMonthRecord),
+            undo: () => RecurringMonthRepository.deleteByIds([newMonthRecord.id]),
+          },
+          {
+            run: () => RecurringMonthRepository.deleteByIds([existing.id]),
+            undo: () => RecurringMonthRepository.upsert(existing),
+          }
+        );
+      }
+      if (linkedTx && updatedTx) {
+        steps.push({
+          run: () => TransactionRepository.update(updatedTx),
+          undo: () => TransactionRepository.update(linkedTx),
+        });
+      }
+      steps.push({
+        run: () => RecurringRepository.update(updatedOldRec),
+        undo: () => RecurringRepository.update(target),
+      });
+      await runWithRollback(steps);
+
+      const [recs, months, txs] = await Promise.all([
+        RecurringRepository.getAll(),
+        RecurringMonthRepository.getAll(),
+        TransactionRepository.getAll(),
+      ]);
+      setAllRecurrings(recs);
+      setAllRecurringMonthRecords(months);
+      setAllTransactions(txs);
+
+      // Nuvem: a nova conta antes do registro do mês (chave estrangeira)
+      await CloudSyncService.autoUpsertRecurring(newRec);
+      if (existing && newMonthRecord) {
         await CloudSyncService.autoUpsertRecurringMonthRecord(newMonthRecord);
         await CloudSyncService.autoDeleteRecurringMonthRecord(existing.id);
-
-        if (existing.isPaid && existing.transactionId) {
-          const tx = allTransactions.find((t) => t.id === existing.transactionId);
-          if (tx) {
-            const updatedTx = { ...tx, amount: newAmount };
-            await TransactionRepository.update(updatedTx);
-            setAllTransactions((prev) => prev.map((t) => (t.id === tx.id ? updatedTx : t)));
-            await CloudSyncService.autoUpsertTransaction(updatedTx);
-          }
-        }
       }
-
-      setAllRecurrings((prev) => [
-        ...prev.map((r) => (r.id === target.id ? updatedOldRec : r)),
-        newRec,
-      ]);
+      if (updatedTx) {
+        await CloudSyncService.autoUpsertTransaction(updatedTx);
+      }
+      await CloudSyncService.autoUpsertRecurring(updatedOldRec);
     }
   };
 
@@ -601,6 +631,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       ? existing.amount
       : (target.monthlyOverrides?.[ym] || target.amount);
 
+    const steps: RollbackStep[] = [];
+    let createdTx: Transaction | null = null;
+    let removedTxId: string | null = null;
+
     if (newIsPaid) {
       // Create transaction in Extrato for this competence
       const dayNum = Math.min(Math.max(target.dueDay || 1, 1), 28);
@@ -618,18 +652,22 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         assignedTo: target.assignedTo,
         isRecurringGenerated: true,
       };
-      await TransactionRepository.add(newTx);
-      setAllTransactions((prev) => [newTx, ...prev]);
-      await CloudSyncService.autoUpsertTransaction(newTx);
+      createdTx = newTx;
       transactionId = newTx.id;
-    } else {
+      steps.push({
+        run: () => TransactionRepository.add(newTx),
+        undo: () => TransactionRepository.delete(newTx.id),
+      });
+    } else if (transactionId) {
       // Unmarking paid: delete linked transaction from Extrato
-      if (transactionId) {
-        await TransactionRepository.delete(transactionId);
-        setAllTransactions((prev) => prev.filter((t) => t.id !== transactionId));
-        await CloudSyncService.autoDeleteTransaction(transactionId);
-        transactionId = undefined;
-      }
+      const txIdToRemove = transactionId;
+      const previousTx = allTransactions.find((t) => t.id === txIdToRemove);
+      removedTxId = txIdToRemove;
+      transactionId = undefined;
+      steps.push({
+        run: () => TransactionRepository.delete(txIdToRemove),
+        undo: () => (previousTx ? TransactionRepository.add(previousTx) : Promise.resolve()),
+      });
     }
 
     const monthRecord: RecurringMonthRecord = {
@@ -644,9 +682,21 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
       transactionId,
       updatedAt: new Date().toISOString(),
     };
+    steps.push({
+      run: () => RecurringMonthRepository.upsert(monthRecord),
+      undo: () =>
+        existing ? RecurringMonthRepository.upsert(existing) : RecurringMonthRepository.deleteByIds([monthRecord.id]),
+    });
 
-    const updatedMonthRecords = await RecurringMonthRepository.upsert(monthRecord);
-    setAllRecurringMonthRecords(updatedMonthRecords);
+    // Transação e registro do mês mudam juntos: se o registro falhar, a transação é desfeita
+    await runWithRollback(steps);
+
+    const [txs, months] = await Promise.all([TransactionRepository.getAll(), RecurringMonthRepository.getAll()]);
+    setAllTransactions(txs);
+    setAllRecurringMonthRecords(months);
+
+    if (createdTx) await CloudSyncService.autoUpsertTransaction(createdTx);
+    if (removedTxId) await CloudSyncService.autoDeleteTransaction(removedTxId);
     await CloudSyncService.autoUpsertRecurringMonthRecord(monthRecord);
   };
 
@@ -669,39 +719,27 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
 
     const ym = `${selectedYear}-${String(selectedMonth).padStart(2, '0')}`;
 
-    // Limpar o mês atual se estava pago (remove transação vinculada do Extrato)
+    // Registro do mês selecionado (se estava pago, a transação vinculada sai do Extrato)
     const existingIndex = allRecurringMonthRecords.findIndex(
       (m) => m.recurringId === id && m.month === selectedMonth && m.year === selectedYear
     );
     const existingMonthRecord = existingIndex >= 0 ? allRecurringMonthRecords[existingIndex] : null;
+    const linkedTxId = existingMonthRecord?.transactionId;
+    const linkedTx = linkedTxId ? allTransactions.find((t) => t.id === linkedTxId) : undefined;
 
-    if (existingMonthRecord?.transactionId) {
-      await TransactionRepository.delete(existingMonthRecord.transactionId);
-      setAllTransactions((prev) => prev.filter((t) => t.id !== existingMonthRecord.transactionId));
-      await CloudSyncService.autoDeleteTransaction(existingMonthRecord.transactionId);
-    }
+    const steps: RollbackStep[] = [];
+    let updatedTarget: RecurringDebit | null = null;
+    let removedMonthRecords: RecurringMonthRecord[] = [];
 
     if (scope === 'month') {
       // 1. Exclui apenas da competência selecionada
       const currentExcluded = target.excludedMonths || [];
-      const newExcluded = Array.from(new Set([...currentExcluded, ym]));
-
-      const updatedTarget: RecurringDebit = {
+      updatedTarget = {
         ...target,
-        excludedMonths: newExcluded,
+        excludedMonths: Array.from(new Set([...currentExcluded, ym])),
         updatedAt: new Date().toISOString(),
       };
-
-      const updatedRecs = await RecurringRepository.update(updatedTarget);
-      setAllRecurrings(updatedRecs);
-      await CloudSyncService.autoUpsertRecurring(updatedTarget);
-
-      // Remove o registro do mês selecionado se existia (no aparelho e na nuvem)
-      if (existingMonthRecord) {
-        const remainingMonths = await RecurringMonthRepository.deleteByIds([existingMonthRecord.id]);
-        setAllRecurringMonthRecords(remainingMonths);
-        await CloudSyncService.autoDeleteRecurringMonthRecord(existingMonthRecord.id);
-      }
+      removedMonthRecords = existingMonthRecord ? [existingMonthRecord] : [];
     } else if (scope === 'forward') {
       // 2. Desta competência em diante: encerra vigência no mês anterior
       let prevYear = selectedYear;
@@ -710,40 +748,64 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         prevMonth = 12;
         prevYear -= 1;
       }
-      const prevCompFormatted = `${prevYear}-${String(prevMonth).padStart(2, '0')}`;
-
-      const updatedTarget: RecurringDebit = {
+      updatedTarget = {
         ...target,
-        endDate: prevCompFormatted,
+        endDate: `${prevYear}-${String(prevMonth).padStart(2, '0')}`,
         updatedAt: new Date().toISOString(),
       };
-
-      const updatedRecs = await RecurringRepository.update(updatedTarget);
-      setAllRecurrings(updatedRecs);
-      await CloudSyncService.autoUpsertRecurring(updatedTarget);
-
-      // Remove registros mensais deste mês em diante (no aparelho e na nuvem)
-      const removedIds = allRecurringMonthRecords
-        .filter((m) => m.recurringId === id && `${m.year}-${String(m.month).padStart(2, '0')}` >= ym)
-        .map((m) => m.id);
-      const remainingMonths = await RecurringMonthRepository.deleteByIds(removedIds);
-      setAllRecurringMonthRecords(remainingMonths);
-      for (const monthRecordId of removedIds) {
-        await CloudSyncService.autoDeleteRecurringMonthRecord(monthRecordId);
-      }
+      removedMonthRecords = allRecurringMonthRecords.filter(
+        (m) => m.recurringId === id && `${m.year}-${String(m.month).padStart(2, '0')}` >= ym
+      );
     } else {
       // 3. De todos os meses (Definitivo)
-      const updated = await RecurringRepository.delete(id);
-      setAllRecurrings(updated);
-      await CloudSyncService.autoDeleteRecurring(id);
+      removedMonthRecords = allRecurringMonthRecords.filter((m) => m.recurringId === id);
+    }
 
-      // Also delete any month records associated with this recurring
-      const removedIds = allRecurringMonthRecords.filter((m) => m.recurringId === id).map((m) => m.id);
-      const updatedMonthRecords = await RecurringMonthRepository.deleteByRecurringId(id);
-      setAllRecurringMonthRecords(updatedMonthRecords);
-      for (const monthRecordId of removedIds) {
-        await CloudSyncService.autoDeleteRecurringMonthRecord(monthRecordId);
-      }
+    const removedIds = removedMonthRecords.map((m) => m.id);
+    if (updatedTarget) {
+      const newTarget = updatedTarget;
+      steps.push({ run: () => RecurringRepository.update(newTarget), undo: () => RecurringRepository.update(target) });
+    } else {
+      steps.push({ run: () => RecurringRepository.delete(id), undo: () => RecurringRepository.add(target) });
+    }
+    if (removedIds.length > 0) {
+      steps.push({
+        run: () => RecurringMonthRepository.deleteByIds(removedIds),
+        undo: () =>
+          RecurringMonthRepository.mutate((all) => [
+            ...removedMonthRecords.filter((m) => !all.some((a) => a.id === m.id)),
+            ...all,
+          ]),
+      });
+    }
+    // A transação do Extrato sai por último: se algo falhar antes, nada é apagado
+    if (linkedTxId) {
+      steps.push({
+        run: () => TransactionRepository.delete(linkedTxId),
+        undo: () => (linkedTx ? TransactionRepository.add(linkedTx) : Promise.resolve()),
+      });
+    }
+    await runWithRollback(steps);
+
+    const [recs, months, txs] = await Promise.all([
+      RecurringRepository.getAll(),
+      RecurringMonthRepository.getAll(),
+      TransactionRepository.getAll(),
+    ]);
+    setAllRecurrings(recs);
+    setAllRecurringMonthRecords(months);
+    setAllTransactions(txs);
+
+    if (updatedTarget) {
+      await CloudSyncService.autoUpsertRecurring(updatedTarget);
+    } else {
+      await CloudSyncService.autoDeleteRecurring(id);
+    }
+    for (const monthRecordId of removedIds) {
+      await CloudSyncService.autoDeleteRecurringMonthRecord(monthRecordId);
+    }
+    if (linkedTxId) {
+      await CloudSyncService.autoDeleteTransaction(linkedTxId);
     }
   };
 
@@ -811,59 +873,70 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     await CloudSyncService.autoUpsertGoal(withUpdate);
   };
 
-  const depositGoal = async (id: string, amount: number, createTransaction: boolean = true) => {
-    const updated = await GoalRepository.deposit(id, amount);
-    setAllGoals(updated);
-    const item = updated.find((g) => g.id === id);
-    if (item) {
-      await CloudSyncService.autoUpsertGoal(item);
+  // Aporte (deposit) ou resgate (withdraw): meta e transação mudam juntas.
+  // Se a transação falhar, o valor da meta volta ao que era (evita aporte em dobro ao tentar de novo).
+  const moveGoalAmount = async (
+    id: string,
+    amount: number,
+    mode: 'deposit' | 'withdraw',
+    createTransaction: boolean
+  ) => {
+    const previousGoal = allGoals.find((g) => g.id === id);
+    if (!previousGoal) return;
 
-      if (createTransaction) {
-        const today = new Date();
-        const txDate = new Date(selectedYear, selectedMonth - 1, Math.min(today.getDate(), 28), 12, 0, 0).toISOString();
-        const tx: Transaction = {
-          id: `tx-goal-dep-${Date.now()}`,
-          workspaceId: activeWorkspace.id,
-          title: `Aporte: ${item.title}`,
-          amount,
-          type: 'expense',
-          category: 'Economia',
-          date: txDate,
-          notes: `Aporte na meta financeira "${item.title}"`,
-        };
-        await TransactionRepository.add(tx);
-        setAllTransactions((prev) => [tx, ...prev]);
-        await CloudSyncService.autoUpsertTransaction(tx);
-      }
+    const steps: RollbackStep[] = [
+      {
+        run: () => (mode === 'deposit' ? GoalRepository.deposit(id, amount) : GoalRepository.withdraw(id, amount)),
+        undo: () => GoalRepository.mutate((all) => all.map((g) => (g.id === id ? previousGoal : g))),
+      },
+    ];
+
+    let tx: Transaction | null = null;
+    if (createTransaction) {
+      const today = new Date();
+      const txDate = new Date(selectedYear, selectedMonth - 1, Math.min(today.getDate(), 28), 12, 0, 0).toISOString();
+      tx =
+        mode === 'deposit'
+          ? {
+              id: `tx-goal-dep-${Date.now()}`,
+              workspaceId: activeWorkspace.id,
+              title: `Aporte: ${previousGoal.title}`,
+              amount,
+              type: 'expense',
+              category: 'Economia',
+              date: txDate,
+              notes: `Aporte na meta financeira "${previousGoal.title}"`,
+            }
+          : {
+              id: `tx-goal-wth-${Date.now()}`,
+              workspaceId: activeWorkspace.id,
+              title: `Resgate: ${previousGoal.title}`,
+              amount,
+              type: 'income',
+              category: 'Economia',
+              date: txDate,
+              notes: `Resgate da meta financeira "${previousGoal.title}"`,
+            };
+      const newTx = tx;
+      steps.push({ run: () => TransactionRepository.add(newTx), undo: () => TransactionRepository.delete(newTx.id) });
     }
+
+    await runWithRollback(steps);
+
+    const [goals, txs] = await Promise.all([GoalRepository.getAll(), TransactionRepository.getAll()]);
+    setAllGoals(goals);
+    setAllTransactions(txs);
+
+    const item = goals.find((g) => g.id === id);
+    if (item) await CloudSyncService.autoUpsertGoal(item);
+    if (tx) await CloudSyncService.autoUpsertTransaction(tx);
   };
 
-  const withdrawGoal = async (id: string, amount: number, createTransaction: boolean = true) => {
-    const updated = await GoalRepository.withdraw(id, amount);
-    setAllGoals(updated);
-    const item = updated.find((g) => g.id === id);
-    if (item) {
-      await CloudSyncService.autoUpsertGoal(item);
+  const depositGoal = (id: string, amount: number, createTransaction: boolean = true) =>
+    moveGoalAmount(id, amount, 'deposit', createTransaction);
 
-      if (createTransaction) {
-        const today = new Date();
-        const txDate = new Date(selectedYear, selectedMonth - 1, Math.min(today.getDate(), 28), 12, 0, 0).toISOString();
-        const tx: Transaction = {
-          id: `tx-goal-wth-${Date.now()}`,
-          workspaceId: activeWorkspace.id,
-          title: `Resgate: ${item.title}`,
-          amount,
-          type: 'income',
-          category: 'Economia',
-          date: txDate,
-          notes: `Resgate da meta financeira "${item.title}"`,
-        };
-        await TransactionRepository.add(tx);
-        setAllTransactions((prev) => [tx, ...prev]);
-        await CloudSyncService.autoUpsertTransaction(tx);
-      }
-    }
-  };
+  const withdrawGoal = (id: string, amount: number, createTransaction: boolean = true) =>
+    moveGoalAmount(id, amount, 'withdraw', createTransaction);
 
   const deleteGoal = async (id: string) => {
     const updated = await GoalRepository.delete(id);
