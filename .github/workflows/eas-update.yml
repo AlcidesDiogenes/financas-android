@@ -29,5 +29,9 @@ jobs:
       - name: 4. Instalar dependencias
         run: npm ci
 
-      - name: 5. Publicar atualizacao online para os aplicativos
+      # Se algum teste falhar, a atualizacao NAO e publicada
+      - name: 5. Rodar testes automaticos
+        run: npm test -- --ci
+
+      - name: 6. Publicar atualizacao online para os aplicativos
         run: eas update --channel production --auto --non-interactive
