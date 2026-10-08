@@ -206,6 +206,12 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       }
     }
 
+    // Conta anual vence no mês do início da vigência: o início é obrigatório
+    if (frequency === 'yearly' && !startMonthYear.trim() && !vigErr) {
+      vigErr = 'Informe o início (MM/AAAA): o mês escolhido é o mês do vencimento anual';
+      hasError = true;
+    }
+
     setVigenciaError(vigErr);
     if (hasError) return;
 
@@ -311,6 +317,29 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
         </TouchableOpacity>
       </View>
 
+      {/* Frequência: Mensal ou Anual */}
+      <View style={[styles.typeContainer, { backgroundColor: theme.surfaceVariant }]}>
+        {(['monthly', 'yearly'] as const).map((option) => {
+          const selected = frequency === option || (option === 'monthly' && frequency === 'weekly');
+          return (
+            <TouchableOpacity
+              key={option}
+              style={[styles.typeButton, selected && { backgroundColor: theme.primary }]}
+              onPress={() => setFrequency(option)}
+            >
+              <Ionicons
+                name={option === 'monthly' ? 'repeat-outline' : 'calendar-outline'}
+                size={18}
+                color={selected ? '#FFF' : theme.textMuted}
+              />
+              <Text style={[styles.typeText, { color: selected ? '#FFF' : theme.textMuted }]}>
+                {option === 'monthly' ? 'Mensal' : 'Anual'}
+              </Text>
+            </TouchableOpacity>
+          );
+        })}
+      </View>
+
       <Input
         label={type === 'income' ? 'Descrição da Renda Recorrente' : 'Nome do Débito / Assinatura'}
         placeholder={type === 'income' ? 'Ex: Salário, Aluguel Recebido, Pensão' : 'Ex: Aluguel, Netflix, Internet, Cartão'}
@@ -325,7 +354,7 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       <View style={styles.row}>
         <View style={{ flex: 1.5, marginRight: 12 }}>
           <Input
-            label="Valor Mensal (R$)"
+            label={frequency === 'yearly' ? 'Valor Anual (R$)' : 'Valor Mensal (R$)'}
             placeholder="0.00"
             keyboardType="decimal-pad"
             value={amountStr}
@@ -391,7 +420,9 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
           </Text>
         ) : null}
         <Text style={{ fontSize: 11, color: theme.textMuted, marginTop: 2, marginLeft: 2 }}>
-          💡 Deixe o término em branco se a conta ou renda for contínua/sem prazo final.
+          {frequency === 'yearly'
+            ? '📅 Conta anual: vence todo ano no mês do início (ex.: início 03/2026 = vence em março de cada ano).'
+            : '💡 Deixe o término em branco se a conta ou renda for contínua/sem prazo final.'}
         </Text>
       </View>
 

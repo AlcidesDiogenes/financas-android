@@ -302,6 +302,12 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
                 <Text style={[styles.urgencyTagText, { color: '#6B7280' }]}>Pausada</Text>
               </View>
             ) : null}
+            {recurring.frequency === 'yearly' ? (
+              <View style={[styles.urgencyTag, { backgroundColor: `${theme.primary}18`, borderColor: `${theme.primary}40` }]}>
+                <Ionicons name="calendar-outline" size={10} color={theme.primary} style={{ marginRight: 3 }} />
+                <Text style={[styles.urgencyTagText, { color: theme.primary }]}>Anual</Text>
+              </View>
+            ) : null}
           </View>
 
           <View style={styles.subInfo}>

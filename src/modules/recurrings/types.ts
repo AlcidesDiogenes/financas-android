@@ -74,6 +74,24 @@ export const isRecurringActiveInMonth = (
     }
   }
 
+  // Anual: vence uma vez por ano, no mês de referência
+  if (recurring.frequency === 'yearly') {
+    const referenceMonth = getYearlyReferenceMonth(recurring);
+    if (referenceMonth !== null && month !== referenceMonth) return false;
+  }
+
   return true;
+};
+
+// Mês (1-12) em que uma conta anual vence: o mês do início da vigência ou, sem ele,
+// o mês em que a conta foi criada.
+export const getYearlyReferenceMonth = (recurring: RecurringDebit): number | null => {
+  if (recurring.startDate) {
+    const month = parseInt(recurring.startDate.split('-')[1], 10);
+    if (month >= 1 && month <= 12) return month;
+  }
+  const created = recurring.createdAt ? new Date(recurring.createdAt) : null;
+  if (created && !isNaN(created.getTime())) return created.getMonth() + 1;
+  return null;
 };
 
