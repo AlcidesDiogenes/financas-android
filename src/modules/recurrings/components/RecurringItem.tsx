@@ -15,13 +15,14 @@ import { useSwipeAction } from '../../../core/theme/SwipeActionContext';
 import { formatCurrency } from '../../../core/utils/currency';
 import { getCategoryMeta } from '../../../core/utils/categories';
 import { Badge } from '../../../core/components/Badge';
+import { runSafely } from '../../../core/utils/runSafely';
 
 interface RecurringItemProps {
   recurring: RecurringDebit;
-  onTogglePaid: (id: string) => void;
+  onTogglePaid: (id: string) => void | Promise<void>;
   onEditAmount?: (id: string, currentAmount: number, title: string) => void;
   onEditFull?: (recurring: RecurringDebit) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
   onRequestDelete?: (recurring: RecurringDebit) => void;
   canEdit?: boolean;
   showVigencia?: boolean;
@@ -155,7 +156,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
             useNativeDriver: true,
             bounciness: 4,
           }).start();
-          onTogglePaid(recurring.id);
+          runSafely(() => onTogglePaid(recurring.id), 'Não foi possível atualizar o pagamento da conta.');
         } else if (isDeleteSide && (onRequestDelete || onDelete)) {
           Animated.spring(translateX, {
             toValue: 0,
@@ -173,7 +174,9 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
                 {
                   text: 'Excluir',
                   style: 'destructive',
-                  onPress: () => onDelete(recurring.id),
+                  onPress: () => {
+                    runSafely(() => onDelete(recurring.id), 'Não foi possível excluir a conta recorrente.');
+                  },
                 },
               ]
             );
@@ -356,7 +359,7 @@ export const RecurringItem: React.FC<RecurringItemProps> = ({
           <View style={styles.actionsRow}>
             <TouchableOpacity
               disabled={!canEdit}
-              onPress={() => onTogglePaid(recurring.id)}
+              onPress={() => runSafely(() => onTogglePaid(recurring.id), 'Não foi possível atualizar o pagamento da conta.')}
               style={styles.badgeBtn}
             >
               <Badge

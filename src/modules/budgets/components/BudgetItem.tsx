@@ -7,11 +7,12 @@ import { formatCurrency } from '../../../core/utils/currency';
 import { getCategoryMeta } from '../../../core/utils/categories';
 import { ProgressBar } from '../../../core/components/ProgressBar';
 import { Badge } from '../../../core/components/Badge';
+import { confirmAndRun } from '../../../core/utils/runSafely';
 
 interface BudgetItemProps {
   progress: BudgetProgress;
   onEdit?: (budget: Budget) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
   canEdit?: boolean;
 }
 
@@ -84,7 +85,14 @@ export const BudgetItem: React.FC<BudgetItemProps> = ({
 
           {canEdit && onDelete && (
             <TouchableOpacity
-              onPress={() => onDelete(budget.id)}
+              onPress={() =>
+              confirmAndRun(
+                'Excluir orçamento?',
+                `O teto de gastos de "${budget.category}" será removido.`,
+                () => onDelete(budget.id),
+                'Não foi possível excluir o orçamento.'
+              )
+            }
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.actionBtn}
             >

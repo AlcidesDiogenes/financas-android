@@ -6,10 +6,11 @@ import { useTheme } from '../../../core/theme/ThemeContext';
 import { formatCurrency } from '../../../core/utils/currency';
 import { formatShortDate } from '../../../core/utils/date';
 import { getCategoryMeta } from '../../../core/utils/categories';
+import { confirmAndRun } from '../../../core/utils/runSafely';
 
 interface TransactionItemProps {
   transaction: Transaction;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
   canEdit?: boolean;
 }
 
@@ -72,7 +73,14 @@ export const TransactionItem: React.FC<TransactionItemProps> = ({
 
         {canEdit && onDelete && (
           <TouchableOpacity
-            onPress={() => onDelete(transaction.id)}
+            onPress={() =>
+              confirmAndRun(
+                'Excluir lançamento?',
+                `"${transaction.title}" será removido do extrato. Esta ação não pode ser desfeita.`,
+                () => onDelete(transaction.id),
+                'Não foi possível excluir o lançamento.'
+              )
+            }
             hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
             style={styles.deleteBtn}
           >

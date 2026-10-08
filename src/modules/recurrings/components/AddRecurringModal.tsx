@@ -11,6 +11,7 @@ import {
 import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
+import { runSafely } from '../../../core/utils/runSafely';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { useWorkspace } from '../../workspaces/WorkspaceContext';
 import { TransactionCategory } from '../../transactions/types';
@@ -41,7 +42,7 @@ interface AddRecurringModalProps {
     endDate?: string;
     isPaused?: boolean;
     monthlyOverrides?: Record<string, number>;
-  }) => void;
+  }) => void | Promise<void>;
   onDelete?: (id: string) => void;
 }
 
@@ -146,7 +147,10 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
     }
   }, [visible, initialData, currentPeriod]);
 
-  const handleSave = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (isSaving) return;
     let hasError = false;
 
     if (!title.trim()) {
@@ -205,21 +209,29 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
     setVigenciaError(vigErr);
     if (hasError) return;
 
-    onSubmit({
-      title: title.trim(),
-      amount: cleanAmount,
-      category,
-      frequency,
-      type,
-      dueDay: day,
-      reminderEnabled: true,
-      assignedTo: assignedTo.trim() || undefined,
-      notes: notes.trim() || undefined,
-      startDate: startDateFormatted,
-      endDate: endDateFormatted,
-      isPaused,
-      monthlyOverrides: initialData?.monthlyOverrides,
-    });
+    // Espera o salvamento: se falhar, mantém o formulário aberto
+    setIsSaving(true);
+    const ok = await runSafely(
+      () =>
+        onSubmit({
+          title: title.trim(),
+          amount: cleanAmount,
+          category,
+          frequency,
+          type,
+          dueDay: day,
+          reminderEnabled: true,
+          assignedTo: assignedTo.trim() || undefined,
+          notes: notes.trim() || undefined,
+          startDate: startDateFormatted,
+          endDate: endDateFormatted,
+          isPaused,
+          monthlyOverrides: initialData?.monthlyOverrides,
+        }),
+      'Não foi possível salvar a conta recorrente. Tente novamente.'
+    );
+    setIsSaving(false);
+    if (!ok) return;
 
     onClose();
   };
@@ -490,6 +502,8 @@ export const AddRecurringModal: React.FC<AddRecurringModalProps> = ({
       <Button
         title={initialData ? 'Salvar Alterações' : type === 'income' ? 'Salvar Provento / Renda' : 'Salvar Conta / Débito Fixo'}
         onPress={handleSave}
+        loading={isSaving}
+        disabled={isSaving}
         style={{ marginTop: 8 }}
       />
 

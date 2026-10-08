@@ -26,6 +26,7 @@ import { ModalContainer } from '../core/components/ModalContainer';
 import { PeriodSelector } from '../core/components/PeriodSelector';
 import { getMonthLabel } from '../core/utils/date';
 import { getCategoryMeta } from '../core/utils/categories';
+import { runSafely } from '../core/utils/runSafely';
 import { Ionicons } from '@expo/vector-icons';
 
 if (Platform.OS === 'android' && UIManager.setLayoutAnimationEnabledExperimental) {
@@ -51,6 +52,7 @@ export const RecurringsScreen: React.FC = () => {
   } = useFinance();
 
   // Filters & Modes
+  const [isSavingAmount, setIsSavingAmount] = useState(false);
   const [filterVigencia, setFilterVigencia] = useState<'active' | 'all'>('active');
   const [typeFilter, setTypeFilter] = useState<TypeFilter>('all');
   const [groupMode, setGroupMode] = useState<GroupMode>('list');
@@ -181,7 +183,10 @@ export const RecurringsScreen: React.FC = () => {
           text: 'Sim, Marcar Pagas',
           onPress: async () => {
             const ids = pendingItems.map((r) => r.id);
-            await batchSetRecurringsPaid(ids, true);
+            await runSafely(
+              () => batchSetRecurringsPaid(ids, true),
+              'Não foi possível marcar todos os itens. Confira a lista: parte deles pode ter sido atualizada.'
+            );
           },
         },
       ]
@@ -218,7 +223,10 @@ export const RecurringsScreen: React.FC = () => {
           text: 'Sim, Marcar Recebidos',
           onPress: async () => {
             const ids = pendingItems.map((r) => r.id);
-            await batchSetRecurringsPaid(ids, true);
+            await runSafely(
+              () => batchSetRecurringsPaid(ids, true),
+              'Não foi possível marcar todos os itens. Confira a lista: parte deles pode ter sido atualizada.'
+            );
           },
         },
       ]
@@ -853,7 +861,7 @@ export const RecurringsScreen: React.FC = () => {
           if (item) {
             handleRequestDelete(item);
           } else {
-            deleteRecurring(id);
+            runSafely(() => deleteRecurring(id), 'Não foi possível excluir a conta recorrente.');
           }
         }}
       />
@@ -980,11 +988,19 @@ export const RecurringsScreen: React.FC = () => {
             if (editingItem) {
               const val = parseFloat(newAmountStr.replace(',', '.'));
               if (!isNaN(val) && val >= 0) {
-                await updateRecurringAmount(editingItem.id, val, amountScope);
-                setEditAmountModalVisible(false);
+                if (isSavingAmount) return;
+                setIsSavingAmount(true);
+                const ok = await runSafely(
+                  () => updateRecurringAmount(editingItem.id, val, amountScope),
+                  'Não foi possível alterar o valor da conta.'
+                );
+                setIsSavingAmount(false);
+                if (ok) setEditAmountModalVisible(false);
               }
             }
           }}
+          loading={isSavingAmount}
+          disabled={isSavingAmount}
           style={{ marginTop: 8 }}
         />
       </ModalContainer>

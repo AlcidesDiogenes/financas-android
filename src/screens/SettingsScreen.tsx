@@ -30,6 +30,7 @@ import { Button } from '../core/components/Button';
 import { Badge } from '../core/components/Badge';
 import { WhatsNewModal } from '../core/components/WhatsNewModal';
 import { APP_VERSION_CONFIG, getAppVersionString, RELEASE_HISTORY } from '../core/version';
+import { runSafely } from '../core/utils/runSafely';
 import { AuthScreen } from './AuthScreen';
 import { OnboardingScreen } from './OnboardingScreen';
 import { PreferencesSelectorModal, PreferenceModalType } from './settings/components/PreferencesSelectorModal';
@@ -281,6 +282,8 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       }
     } catch {
       Alert.alert('Erro', 'Ocorreu um erro ao excluir a conta.');
+    } finally {
+      setStatusMessage('');
     }
   };
 
@@ -421,9 +424,16 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                           style: 'destructive',
                           onPress: async () => {
                             setStatusMessage('Salvando alterações e desconectando...');
-                            const res = await signOut();
-                            if (res.success) return;
+                            let res: { success: boolean; pendingCount?: number };
+                            try {
+                              res = await signOut();
+                            } catch {
+                              setStatusMessage('');
+                              Alert.alert('Erro', 'Não foi possível sair da conta. Tente novamente.');
+                              return;
+                            }
                             setStatusMessage('');
+                            if (res.success) return;
                             // Há alterações que não chegaram à nuvem: sair agora as descartaria
                             Alert.alert(
                               'Alterações não enviadas',
@@ -435,7 +445,11 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
                                   style: 'destructive',
                                   onPress: async () => {
                                     setStatusMessage('Desconectando...');
-                                    await signOut({ force: true });
+                                    await runSafely(
+                                      () => signOut({ force: true }),
+                                      'Não foi possível sair da conta. Tente novamente.'
+                                    );
+                                    setStatusMessage('');
                                   },
                                 },
                               ]
@@ -578,7 +592,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
               disabled={!isHardwareSupported}
               value={isBiometricsEnabled}
               onValueChange={() => {
-                toggleBiometrics();
+                runSafely(toggleBiometrics, 'Não foi possível alterar a proteção por biometria.');
               }}
               thumbColor={isBiometricsEnabled ? theme.primary : '#ccc'}
             />
@@ -879,7 +893,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
           setShowTransferModal(false);
           try {
             setStatusMessage('Transferindo propriedade...');
-            await transferOwnership(pendingWsToTransfer.workspaceId, newOwnerEmail);
+            const res = await transferOwnership(pendingWsToTransfer.workspaceId, newOwnerEmail);
+            // Só exclui a conta se a transferência realmente aconteceu
+            if (!res.success) {
+              Alert.alert('Erro', res.message || 'Falha ao transferir propriedade. Sua conta não foi excluída.');
+              return;
+            }
             await executeFinalAccountDeletion();
           } catch {
             Alert.alert('Erro', 'Falha ao transferir propriedade.');
@@ -892,7 +911,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
           setShowTransferModal(false);
           try {
             setStatusMessage('Excluindo espaço...');
-            await deleteWorkspace(pendingWsToTransfer.workspaceId);
+            const res = await deleteWorkspace(pendingWsToTransfer.workspaceId);
+            // Só exclui a conta se o espaço realmente foi excluído
+            if (!res.success) {
+              Alert.alert('Erro', res.message || 'Falha ao excluir o espaço. Sua conta não foi excluída.');
+              return;
+            }
             await executeFinalAccountDeletion();
           } catch {
             Alert.alert('Erro', 'Falha ao excluir espaço.');

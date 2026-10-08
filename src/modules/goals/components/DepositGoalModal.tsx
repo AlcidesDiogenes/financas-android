@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
+import { runSafely } from '../../../core/utils/runSafely';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { Ionicons } from '@expo/vector-icons';
 
@@ -12,7 +13,7 @@ interface DepositGoalModalProps {
   goalTitle: string;
   initialMode?: 'deposit' | 'withdraw';
   maxWithdrawAmount?: number;
-  onSubmit: (amount: number, mode: 'deposit' | 'withdraw', createTransaction: boolean) => void;
+  onSubmit: (amount: number, mode: 'deposit' | 'withdraw', createTransaction: boolean) => void | Promise<void>;
 }
 
 export const DepositGoalModal: React.FC<DepositGoalModalProps> = ({
@@ -35,7 +36,10 @@ export const DepositGoalModal: React.FC<DepositGoalModalProps> = ({
     setError('');
   }, [initialMode, visible]);
 
-  const handleConfirm = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleConfirm = async () => {
+    if (isSaving) return;
     const cleanAmount = parseFloat(amountStr.replace(',', '.'));
     if (isNaN(cleanAmount) || cleanAmount <= 0) {
       setError('Informe um valor válido maior que zero');
@@ -48,7 +52,16 @@ export const DepositGoalModal: React.FC<DepositGoalModalProps> = ({
     }
 
     setError('');
-    onSubmit(cleanAmount, mode, createTransaction);
+    // Espera o salvamento: se falhar, mantém o valor digitado
+    setIsSaving(true);
+    const ok = await runSafely(
+      () => onSubmit(cleanAmount, mode, createTransaction),
+      mode === 'deposit'
+        ? 'Não foi possível registrar o aporte. Tente novamente.'
+        : 'Não foi possível registrar o resgate. Tente novamente.'
+    );
+    setIsSaving(false);
+    if (!ok) return;
     setAmountStr('');
     onClose();
   };
@@ -151,6 +164,8 @@ export const DepositGoalModal: React.FC<DepositGoalModalProps> = ({
       <Button
         title={mode === 'deposit' ? 'Confirmar Aporte na Meta' : 'Confirmar Resgate da Meta'}
         onPress={handleConfirm}
+        loading={isSaving}
+        disabled={isSaving}
         style={{ marginTop: 12 }}
       />
     </ModalContainer>

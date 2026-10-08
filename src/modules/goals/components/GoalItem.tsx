@@ -7,13 +7,14 @@ import { formatCurrency } from '../../../core/utils/currency';
 import { formatShortDate } from '../../../core/utils/date';
 import { ProgressBar } from '../../../core/components/ProgressBar';
 import { Badge } from '../../../core/components/Badge';
+import { confirmAndRun } from '../../../core/utils/runSafely';
 
 interface GoalItemProps {
   progress: GoalProgress;
   onDeposit: (goalId: string, currentTitle: string) => void;
   onWithdraw?: (goalId: string, currentTitle: string, currentAmount: number) => void;
   onEdit?: (goal: Goal) => void;
-  onDelete?: (id: string) => void;
+  onDelete?: (id: string) => void | Promise<void>;
   canEdit?: boolean;
 }
 
@@ -72,7 +73,14 @@ export const GoalItem: React.FC<GoalItemProps> = ({
 
           {canEdit && onDelete && (
             <TouchableOpacity
-              onPress={() => onDelete(goal.id)}
+              onPress={() =>
+              confirmAndRun(
+                'Excluir meta?',
+                `A meta "${goal.title}" será removida. Esta ação não pode ser desfeita.`,
+                () => onDelete(goal.id),
+                'Não foi possível excluir a meta.'
+              )
+            }
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               style={styles.actionBtn}
             >

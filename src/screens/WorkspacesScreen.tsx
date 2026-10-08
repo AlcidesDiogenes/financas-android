@@ -1,4 +1,4 @@
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef } from 'react';
 import {
   View,
   Text,
@@ -21,6 +21,7 @@ import { Input } from '../core/components/Input';
 import { ModalContainer } from '../core/components/ModalContainer';
 import { AuthScreen } from './AuthScreen';
 import { Ionicons } from '@expo/vector-icons';
+import { runSafely } from '../core/utils/runSafely';
 
 export const WorkspacesScreen: React.FC = () => {
   const { theme } = useTheme();
@@ -84,6 +85,8 @@ export const WorkspacesScreen: React.FC = () => {
   } | null>(null);
   const [manageStep, setManageStep] = useState<'options' | 'transfer' | 'remove'>('options');
   const [isManagingLoading, setIsManagingLoading] = useState(false);
+  // Evita envio duplicado (toque duplo) enquanto uma criação/convite está em andamento
+  const isSubmittingRef = useRef(false);
 
   const isSolo = activeWorkspace.type === 'solo';
 
@@ -112,13 +115,15 @@ export const WorkspacesScreen: React.FC = () => {
         {
           text: 'Gerar Novo Código',
           style: 'default',
-          onPress: async () => {
-            const res = await regenerateWorkspaceInviteCode(activeWorkspace.id);
-            if (res.success) {
-              Alert.alert('Sucesso 🎉', `Novo código gerado:\n\n${res.newCode}`);
-            } else {
-              Alert.alert('Aviso', res.message);
-            }
+          onPress: () => {
+            runSafely(async () => {
+              const res = await regenerateWorkspaceInviteCode(activeWorkspace.id);
+              if (res.success) {
+                Alert.alert('Sucesso 🎉', `Novo código gerado:\n\n${res.newCode}`);
+              } else {
+                Alert.alert('Aviso', res.message);
+              }
+            }, 'Não foi possível gerar um novo código de convite.');
           },
         },
       ]
@@ -139,13 +144,15 @@ export const WorkspacesScreen: React.FC = () => {
         {
           text: 'Excluir Definitivamente',
           style: 'destructive',
-          onPress: async () => {
-            const res = await deleteWorkspace(activeWorkspace.id);
-            if (res.success) {
-              Alert.alert('Sucesso', res.message);
-            } else {
-              Alert.alert('Aviso', res.message);
-            }
+          onPress: () => {
+            runSafely(async () => {
+              const res = await deleteWorkspace(activeWorkspace.id);
+              if (res.success) {
+                Alert.alert('Sucesso', res.message);
+              } else {
+                Alert.alert('Aviso', res.message);
+              }
+            }, 'Não foi possível excluir o espaço.');
           },
         },
       ]
@@ -158,10 +165,20 @@ export const WorkspacesScreen: React.FC = () => {
       return;
     }
     setNewWsNameError('');
-    await createWorkspace(newWsName.trim(), newWsDesc.trim(), newWsIsShared);
-    setNewWsName('');
-    setNewWsDesc('');
-    setCreateModalVisible(false);
+    if (isSubmittingRef.current) return; // evita criar em dobro com toque duplo
+    isSubmittingRef.current = true;
+    try {
+      const ok = await runSafely(
+        () => createWorkspace(newWsName.trim(), newWsDesc.trim(), newWsIsShared),
+        'Não foi possível criar o espaço.'
+      );
+      if (!ok) return;
+      setNewWsName('');
+      setNewWsDesc('');
+      setCreateModalVisible(false);
+    } finally {
+      isSubmittingRef.current = false;
+    }
   };
 
   const handleJoinWorkspace = async () => {
@@ -201,7 +218,17 @@ export const WorkspacesScreen: React.FC = () => {
 
     if (hasErr) return;
 
-    await addMember(activeWorkspace.id, memberName.trim(), memberEmail.trim(), memberRole);
+    if (isSubmittingRef.current) return;
+    isSubmittingRef.current = true;
+    try {
+      const ok = await runSafely(
+        () => addMember(activeWorkspace.id, memberName.trim(), memberEmail.trim(), memberRole),
+        'Não foi possível adicionar o membro.'
+      );
+      if (!ok) return;
+    } finally {
+      isSubmittingRef.current = false;
+    }
     setMemberName('');
     setMemberEmail('');
     setMemberRole('editor');
@@ -217,13 +244,15 @@ export const WorkspacesScreen: React.FC = () => {
         {
           text: 'Sair do Espaço',
           style: 'destructive',
-          onPress: async () => {
-            const res = await leaveWorkspace(activeWorkspace.id);
-            if (res.success) {
-              Alert.alert('Sucesso', res.message);
-            } else {
-              Alert.alert('Aviso', res.message);
-            }
+          onPress: () => {
+            runSafely(async () => {
+              const res = await leaveWorkspace(activeWorkspace.id);
+              if (res.success) {
+                Alert.alert('Sucesso', res.message);
+              } else {
+                Alert.alert('Aviso', res.message);
+              }
+            }, 'Não foi possível sair do espaço.');
           },
         },
       ]
@@ -252,30 +281,49 @@ export const WorkspacesScreen: React.FC = () => {
     if (!selectedMemberToManage) return;
     setIsManagingLoading(true);
     const nextRole: WorkspaceRole = selectedMemberToManage.role === 'editor' ? 'viewer' : 'editor';
-    await updateMemberRole(activeWorkspace.id, selectedMemberToManage.id, nextRole);
-    setIsManagingLoading(false);
-    handleCloseManageMember();
+    try {
+      await runSafely(
+        () => updateMemberRole(activeWorkspace.id, selectedMemberToManage.id, nextRole),
+        'Não foi possível alterar a permissão do membro.'
+      );
+    } finally {
+      setIsManagingLoading(false);
+      handleCloseManageMember();
+    }
   };
 
   const handleConfirmTransfer = async () => {
     if (!selectedMemberToManage) return;
     setIsManagingLoading(true);
-    const res = await transferOwnership(activeWorkspace.id, selectedMemberToManage.email);
-    setIsManagingLoading(false);
-    handleCloseManageMember();
-    if (res.success) {
-      Alert.alert('Sucesso 🎉', res.message);
-    } else {
-      Alert.alert('Aviso', res.message);
+    const targetEmail = selectedMemberToManage.email;
+    try {
+      await runSafely(async () => {
+        const res = await transferOwnership(activeWorkspace.id, targetEmail);
+        if (res.success) {
+          Alert.alert('Sucesso 🎉', res.message);
+        } else {
+          Alert.alert('Aviso', res.message);
+        }
+      }, 'Não foi possível transferir a propriedade do espaço.');
+    } finally {
+      setIsManagingLoading(false);
+      handleCloseManageMember();
     }
   };
 
   const handleConfirmRemove = async () => {
     if (!selectedMemberToManage) return;
     setIsManagingLoading(true);
-    await removeMember(activeWorkspace.id, selectedMemberToManage.id);
-    setIsManagingLoading(false);
-    handleCloseManageMember();
+    const memberId = selectedMemberToManage.id;
+    try {
+      await runSafely(
+        () => removeMember(activeWorkspace.id, memberId),
+        'Não foi possível remover o membro.'
+      );
+    } finally {
+      setIsManagingLoading(false);
+      handleCloseManageMember();
+    }
   };
 
   const handleRefresh = async () => {
@@ -330,8 +378,10 @@ export const WorkspacesScreen: React.FC = () => {
         {
           text: 'Confirmar Aprovação',
           onPress: async () => {
-            await approveMember(wsId, req.id, role);
-            Alert.alert('Membro Aprovado! 🎉', `"${req.name}" agora tem acesso a este espaço.`);
+            const ok = await runSafely(() => approveMember(wsId, req.id, role), 'Não foi possível aprovar o membro.');
+            if (ok) {
+              Alert.alert('Membro Aprovado! 🎉', `"${req.name}" agora tem acesso a este espaço.`);
+            }
           },
         },
       ]
@@ -351,8 +401,10 @@ export const WorkspacesScreen: React.FC = () => {
           text: 'Recusar',
           style: 'destructive',
           onPress: async () => {
-            await rejectMember(wsId, req.id);
-            Alert.alert('Solicitação Recusada', `A solicitação foi recusada e o usuário não terá acesso.`);
+            const ok = await runSafely(() => rejectMember(wsId, req.id), 'Não foi possível recusar a solicitação.');
+            if (ok) {
+              Alert.alert('Solicitação Recusada', `A solicitação foi recusada e o usuário não terá acesso.`);
+            }
           },
         },
       ]
@@ -392,7 +444,7 @@ export const WorkspacesScreen: React.FC = () => {
                 <TouchableOpacity
                   key={ws.id}
                   activeOpacity={0.7}
-                  onPress={() => setActiveWorkspace(ws.id)}
+                  onPress={() => runSafely(() => setActiveWorkspace(ws.id), 'Não foi possível trocar de espaço.')}
                   style={[
                     styles.tabChip,
                     {
@@ -594,9 +646,14 @@ export const WorkspacesScreen: React.FC = () => {
                 </View>
               ) : (
                 <TouchableOpacity
-                  onPress={() => {
-                    setDefaultWorkspace(activeWorkspace.id);
-                    Alert.alert('Espaço Padrão Definido! ⭐', `"${activeWorkspace.name}" agora é o seu espaço padrão. Ele será aberto automaticamente ao entrar no app.`);
+                  onPress={async () => {
+                    const ok = await runSafely(
+                      () => setDefaultWorkspace(activeWorkspace.id),
+                      'Não foi possível definir o espaço padrão.'
+                    );
+                    if (ok) {
+                      Alert.alert('Espaço Padrão Definido! ⭐', `"${activeWorkspace.name}" agora é o seu espaço padrão. Ele será aberto automaticamente ao entrar no app.`);
+                    }
                   }}
                   activeOpacity={0.7}
                   hitSlop={{ top: 6, bottom: 6, left: 6, right: 6 }}
@@ -1153,8 +1210,11 @@ export const WorkspacesScreen: React.FC = () => {
               setRenameError('Informe o novo nome');
               return;
             }
-            await renameWorkspace(activeWorkspace.id, renameValue.trim());
-            setRenameModalVisible(false);
+            const ok = await runSafely(
+              () => renameWorkspace(activeWorkspace.id, renameValue.trim()),
+              'Não foi possível renomear o espaço.'
+            );
+            if (ok) setRenameModalVisible(false);
           }}
           style={{ marginTop: 8 }}
         />

@@ -109,16 +109,17 @@ export const PlanningScreen: React.FC = () => {
     setDepositModalVisible(true);
   };
 
-  const handleConfirmDepositOrWithdraw = (
+  // Devolve a promessa para o modal esperar o salvamento (e manter o valor se falhar)
+  const handleConfirmDepositOrWithdraw = async (
     amount: number,
     mode: 'deposit' | 'withdraw',
     createTransaction: boolean
   ) => {
     if (selectedGoalForDeposit) {
       if (mode === 'deposit') {
-        depositGoal(selectedGoalForDeposit.id, amount, createTransaction);
+        await depositGoal(selectedGoalForDeposit.id, amount, createTransaction);
       } else {
-        withdrawGoal(selectedGoalForDeposit.id, amount, createTransaction);
+        await withdrawGoal(selectedGoalForDeposit.id, amount, createTransaction);
       }
     }
   };

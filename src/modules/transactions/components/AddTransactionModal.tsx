@@ -13,6 +13,7 @@ import { useTheme } from '../../../core/theme/ThemeContext';
 import { useWorkspace } from '../../workspaces/WorkspaceContext';
 import { TransactionCategory, TransactionType } from '../types';
 import { CATEGORIES_META } from '../../../core/utils/categories';
+import { runSafely } from '../../../core/utils/runSafely';
 import { Ionicons } from '@expo/vector-icons';
 
 interface AddTransactionModalProps {
@@ -27,7 +28,7 @@ interface AddTransactionModalProps {
     date: string;
     assignedTo?: string;
     notes?: string;
-  }) => void;
+  }) => void | Promise<void>;
 }
 
 const EXPENSE_CATEGORIES: TransactionCategory[] = [
@@ -92,7 +93,10 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
     }
   }, [visible, initialMode]);
 
-  const handleSave = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (isSaving) return;
     let hasError = false;
 
     if (!title.trim()) {
@@ -116,15 +120,23 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
 
     if (hasError) return;
 
-    onSubmit({
-      title: title.trim(),
-      amount: cleanAmount,
-      type,
-      category,
-      date: new Date().toISOString(),
-      assignedTo: assignedTo.trim() || undefined,
-      notes: notes.trim() || undefined,
-    });
+    // Espera o salvamento: se falhar, mantém o formulário aberto com o que foi digitado
+    setIsSaving(true);
+    const ok = await runSafely(
+      () =>
+        onSubmit({
+          title: title.trim(),
+          amount: cleanAmount,
+          type,
+          category,
+          date: new Date().toISOString(),
+          assignedTo: assignedTo.trim() || undefined,
+          notes: notes.trim() || undefined,
+        }),
+      'Não foi possível salvar o lançamento. Tente novamente.'
+    );
+    setIsSaving(false);
+    if (!ok) return;
 
     // Reset form
     setTitle('');
@@ -372,6 +384,8 @@ export const AddTransactionModal: React.FC<AddTransactionModalProps> = ({
             : 'Cadastrar Despesa'
         }
         onPress={handleSave}
+        loading={isSaving}
+        disabled={isSaving}
         style={{ marginTop: 12 }}
       />
     </ModalContainer>

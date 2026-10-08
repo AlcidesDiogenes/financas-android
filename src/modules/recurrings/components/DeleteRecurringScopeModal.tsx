@@ -5,6 +5,7 @@ import { useTheme } from '../../../core/theme/ThemeContext';
 import { RecurringDebit, DeleteRecurringScope } from '../types';
 import { Ionicons } from '@expo/vector-icons';
 import { getMonthLabel } from '../../../core/utils/date';
+import { runSafely } from '../../../core/utils/runSafely';
 
 interface DeleteRecurringScopeModalProps {
   visible: boolean;
@@ -12,7 +13,7 @@ interface DeleteRecurringScopeModalProps {
   selectedMonth: number;
   selectedYear: number;
   onClose: () => void;
-  onConfirm: (id: string, scope: DeleteRecurringScope) => void;
+  onConfirm: (id: string, scope: DeleteRecurringScope) => void | Promise<void>;
 }
 
 export const DeleteRecurringScopeModal: React.FC<DeleteRecurringScopeModalProps> = ({
@@ -48,8 +49,8 @@ export const DeleteRecurringScopeModal: React.FC<DeleteRecurringScopeModalProps>
         <TouchableOpacity
           style={[styles.optionCard, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}
           onPress={() => {
-            onConfirm(recurring.id, 'month');
             onClose();
+            runSafely(() => onConfirm(recurring.id, 'month'), 'Não foi possível excluir a conta recorrente.');
           }}
           activeOpacity={0.7}
         >
@@ -70,8 +71,8 @@ export const DeleteRecurringScopeModal: React.FC<DeleteRecurringScopeModalProps>
         <TouchableOpacity
           style={[styles.optionCard, { backgroundColor: theme.surfaceVariant, borderColor: theme.border }]}
           onPress={() => {
-            onConfirm(recurring.id, 'forward');
             onClose();
+            runSafely(() => onConfirm(recurring.id, 'forward'), 'Não foi possível excluir a conta recorrente.');
           }}
           activeOpacity={0.7}
         >
@@ -92,8 +93,8 @@ export const DeleteRecurringScopeModal: React.FC<DeleteRecurringScopeModalProps>
         <TouchableOpacity
           style={[styles.optionCard, { backgroundColor: '#EF444410', borderColor: '#EF444440' }]}
           onPress={() => {
-            onConfirm(recurring.id, 'all');
             onClose();
+            runSafely(() => onConfirm(recurring.id, 'all'), 'Não foi possível excluir a conta recorrente.');
           }}
           activeOpacity={0.7}
         >

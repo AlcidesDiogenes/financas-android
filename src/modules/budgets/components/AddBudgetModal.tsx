@@ -9,6 +9,7 @@ import {
 import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
+import { runSafely } from '../../../core/utils/runSafely';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { TransactionCategory } from '../../transactions/types';
 import { CATEGORIES_META } from '../../../core/utils/categories';
@@ -24,7 +25,7 @@ interface AddBudgetModalProps {
     startDate?: string,
     endDate?: string,
     budgetId?: string
-  ) => void;
+  ) => void | Promise<void>;
   initialData?: Budget | null;
 }
 
@@ -113,7 +114,10 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
     setVigenciaError('');
   }, [initialData, visible]);
 
-  const handleSave = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (isSaving) return;
     let hasError = false;
 
     const cleanAmount = parseFloat(limitStr.replace(',', '.'));
@@ -156,13 +160,14 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
 
     setVigenciaError(vigErr);
     if (hasError) return;
-    onSubmit(
-      category,
-      cleanAmount,
-      startDateFormatted,
-      endDateFormatted,
-      initialData?.id
+    // Espera o salvamento: se falhar, mantém o formulário aberto
+    setIsSaving(true);
+    const ok = await runSafely(
+      () => onSubmit(category, cleanAmount, startDateFormatted, endDateFormatted, initialData?.id),
+      'Não foi possível salvar o orçamento. Tente novamente.'
     );
+    setIsSaving(false);
+    if (!ok) return;
 
     setLimitStr('');
     setCategory('Alimentação');
@@ -274,6 +279,8 @@ export const AddBudgetModal: React.FC<AddBudgetModalProps> = ({
       <Button
         title={initialData ? 'Salvar Alterações' : 'Salvar Orçamento'}
         onPress={handleSave}
+        loading={isSaving}
+        disabled={isSaving}
         style={{ marginTop: 8 }}
       />
     </ModalContainer>

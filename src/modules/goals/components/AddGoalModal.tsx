@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity } from 'react-native';
 import { ModalContainer } from '../../../core/components/ModalContainer';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
+import { runSafely } from '../../../core/utils/runSafely';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { Goal } from '../types';
 import { Ionicons } from '@expo/vector-icons';
@@ -18,7 +19,7 @@ interface AddGoalModalProps {
     icon: string;
     color: string;
     notes?: string;
-  }) => void;
+  }) => void | Promise<void>;
   initialData?: Goal | null;
 }
 
@@ -80,7 +81,10 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
     setTargetError('');
   }, [initialData, visible]);
 
-  const handleSave = () => {
+  const [isSaving, setIsSaving] = useState(false);
+
+  const handleSave = async () => {
+    if (isSaving) return;
     let hasError = false;
 
     if (!title.trim()) {
@@ -106,15 +110,23 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
     const deadline = new Date();
     deadline.setMonth(deadline.getMonth() + months);
 
-    onSubmit({
-      title: title.trim(),
-      targetAmount: target,
-      initialAmount: initial,
-      deadlineDate: deadline.toISOString(),
-      icon: GOAL_ICONS[selectedIconIndex].icon,
-      color: GOAL_ICONS[selectedIconIndex].color,
-      notes: notes.trim() ? notes.trim() : undefined,
-    });
+    // Espera o salvamento: se falhar, mantém o formulário aberto
+    setIsSaving(true);
+    const ok = await runSafely(
+      () =>
+        onSubmit({
+          title: title.trim(),
+          targetAmount: target,
+          initialAmount: initial,
+          deadlineDate: deadline.toISOString(),
+          icon: GOAL_ICONS[selectedIconIndex].icon,
+          color: GOAL_ICONS[selectedIconIndex].color,
+          notes: notes.trim() ? notes.trim() : undefined,
+        }),
+      'Não foi possível salvar a meta. Tente novamente.'
+    );
+    setIsSaving(false);
+    if (!ok) return;
 
     onClose();
   };
@@ -207,6 +219,8 @@ export const AddGoalModal: React.FC<AddGoalModalProps> = ({
       <Button
         title={initialData ? 'Salvar Alterações' : 'Criar Meta Financeira'}
         onPress={handleSave}
+        loading={isSaving}
+        disabled={isSaving}
         style={{ marginTop: 8 }}
       />
     </ModalContainer>
