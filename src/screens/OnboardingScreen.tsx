@@ -450,7 +450,7 @@ export const OnboardingScreen: React.FC<OnboardingScreenProps> = ({ onFinish }) 
           >
             <Text style={styles.nextBtnText}>
               {currentIndex === SLIDES.length - 1
-                ? 'Começar a Usar o App 🚀'
+                ? 'Começar a Usar o Finduo'
                 : 'Próximo Passo'}
             </Text>
             <Ionicons

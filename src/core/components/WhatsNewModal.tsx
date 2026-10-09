@@ -160,7 +160,8 @@ export const WhatsNewModal: React.FC<WhatsNewModalProps> = ({
           {/* Botão de Fechar */}
           <View style={styles.footer}>
             <Button
-              title="Entendi, vamos lá! 🚀"
+              title="Entendi, vamos lá!"
+              icon={<Ionicons name="rocket-outline" size={18} color="#FFF" />}
               variant="primary"
               onPress={onClose}
               style={{ width: '100%' }}
