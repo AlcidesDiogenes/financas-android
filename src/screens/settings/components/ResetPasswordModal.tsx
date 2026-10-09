@@ -15,6 +15,7 @@ import { useTheme } from '../../../core/theme/ThemeContext';
 import { useAuth } from '../../../services/auth/AuthContext';
 import { Input } from '../../../core/components/Input';
 import { Button } from '../../../core/components/Button';
+import { FeedbackModal } from '../../../core/components/FeedbackModal';
 
 interface ResetPasswordModalProps {
   visible: boolean;
@@ -35,6 +36,7 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({
   const [newPasswordError, setNewPasswordError] = useState('');
   const [confirmPasswordError, setConfirmPasswordError] = useState('');
   const [generalError, setGeneralError] = useState('');
+  const [isSuccess, setIsSuccess] = useState(false);
 
   const resetForm = () => {
     setNewPasswordVal('');
@@ -47,6 +49,7 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({
 
   const handleClose = () => {
     resetForm();
+    setIsSuccess(false);
     onClose();
   };
 
@@ -83,11 +86,7 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({
       setLoading(false);
 
       if (res.success) {
-        Alert.alert(
-          'Senha Redefinida! 🎉',
-          'Sua nova senha foi cadastrada com sucesso. Você já está conectado ao Finduo!',
-          [{ text: 'Continuar', onPress: handleClose }]
-        );
+        setIsSuccess(true);
       } else {
         setGeneralError(res.error || 'Não foi possível redefinir a senha.');
       }
@@ -98,8 +97,9 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({
   };
 
   return (
-    <Modal
-      visible={visible}
+    <>
+      <Modal
+        visible={visible && !isSuccess}
       transparent
       animationType="fade"
       statusBarTranslucent
@@ -220,6 +220,18 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({
         </ScrollView>
       </KeyboardAvoidingView>
     </Modal>
+
+    {/* MODAL DE SUCESSO ELEGANTE COM PADRÃO FINDUO */}
+    <FeedbackModal
+      visible={isSuccess}
+      type="success"
+      iconName="checkmark-circle"
+      title="Senha Redefinida! 🎉"
+      message="Sua nova senha foi cadastrada com sucesso. Você já está conectado ao Finduo!"
+      confirmText="Continuar no Finduo 🚀"
+      onConfirm={handleClose}
+    />
+  </>
   );
 };
 

@@ -38,6 +38,7 @@ import { OTAUpdateModal, OTAUpdateStep } from './settings/components/OTAUpdateMo
 import { ChangePasswordModal } from './settings/components/ChangePasswordModal';
 import { EditProfileModal } from './settings/components/EditProfileModal';
 import { TransferOwnershipModal, PendingWorkspaceTransfer } from './settings/components/TransferOwnershipModal';
+import { FeedbackModal } from '../core/components/FeedbackModal';
 import { Ionicons } from '@expo/vector-icons';
 
 interface SettingsScreenProps {
@@ -75,19 +76,48 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [showProfileModal, setShowProfileModal] = useState(false);
   const [showTransferModal, setShowTransferModal] = useState(false);
   const [pendingWsToTransfer, setPendingWsToTransfer] = useState<PendingWorkspaceTransfer | null>(null);
+  const [feedbackModal, setFeedbackModal] = useState<{
+    visible: boolean;
+    type?: 'success' | 'info' | 'warning' | 'error';
+    iconName?: any;
+    title: string;
+    message: string;
+    confirmText?: string;
+  } | null>(null);
 
   const handleManualSync = async () => {
     if (!user) {
-      Alert.alert('Modo Offline', 'Faça login para sincronizar seus dados com a nuvem.');
+      setFeedbackModal({
+        visible: true,
+        type: 'info',
+        iconName: 'cloud-offline-outline',
+        title: 'Modo Offline',
+        message: 'Faça login na sua conta para sincronizar seus dados com a nuvem.',
+        confirmText: 'Entendido',
+      });
       return;
     }
     try {
       setIsSyncing(true);
       setStatusMessage('Sincronizando com a nuvem...');
       await reloadAll();
-      Alert.alert('Sincronização', 'Dados sincronizados com sucesso!');
+      setFeedbackModal({
+        visible: true,
+        type: 'success',
+        iconName: 'cloud-done',
+        title: 'Sincronização Concluída ✨',
+        message: 'Seus dados foram sincronizados com a nuvem com sucesso! Todos os seus espaços e lançamentos estão atualizados.',
+        confirmText: 'Entendido',
+      });
     } catch {
-      Alert.alert('Erro', 'Falha ao sincronizar dados.');
+      setFeedbackModal({
+        visible: true,
+        type: 'error',
+        iconName: 'cloud-offline',
+        title: 'Falha na Sincronização',
+        message: 'Não foi possível sincronizar os dados no momento. Verifique sua conexão com a internet.',
+        confirmText: 'Fechar',
+      });
     } finally {
       setIsSyncing(false);
       setStatusMessage('');
@@ -100,12 +130,31 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       const monthLabel = getMonthLabel(selectedMonth, selectedYear);
       const success = await ExportService.exportTransactionsToCSV(transactions, monthLabel);
       if (success) {
-        Alert.alert('Sucesso', 'Relatório CSV exportado e compartilhado com sucesso!');
+        setFeedbackModal({
+          visible: true,
+          type: 'success',
+          iconName: 'document-text',
+          title: 'Exportação Concluída 📊',
+          message: 'Relatório CSV exportado e compartilhado com sucesso!',
+          confirmText: 'Entendido',
+        });
       } else {
-        Alert.alert('Aviso', 'Não foi possível compartilhar o arquivo no momento.');
+        setFeedbackModal({
+          visible: true,
+          type: 'warning',
+          title: 'Aviso',
+          message: 'Não foi possível compartilhar o arquivo no momento.',
+          confirmText: 'Fechar',
+        });
       }
     } catch {
-      Alert.alert('Erro', 'Não foi possível exportar os dados.');
+      setFeedbackModal({
+        visible: true,
+        type: 'error',
+        title: 'Erro na Exportação',
+        message: 'Não foi possível exportar os dados.',
+        confirmText: 'Fechar',
+      });
     } finally {
       setStatusMessage('');
     }
@@ -953,6 +1002,17 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         visible={!!activePrefModal}
         activeType={activePrefModal}
         onClose={() => setActivePrefModal(null)}
+      />
+
+      {/* MODAL DE FEEDBACK ELEGANTE (SINCRONIZAÇÃO E EXPORTAÇÃO) */}
+      <FeedbackModal
+        visible={!!feedbackModal?.visible}
+        type={feedbackModal?.type}
+        iconName={feedbackModal?.iconName}
+        title={feedbackModal?.title || ''}
+        message={feedbackModal?.message || ''}
+        confirmText={feedbackModal?.confirmText || 'Entendido'}
+        onConfirm={() => setFeedbackModal(null)}
       />
     </View>
   );

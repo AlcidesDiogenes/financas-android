@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import {
   View,
   Text,
+  Image,
   StyleSheet,
   TouchableOpacity,
   KeyboardAvoidingView,
@@ -22,7 +23,7 @@ interface AuthScreenProps {
 }
 
 export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
-  const { theme } = useTheme();
+  const { theme, isDark } = useTheme();
   const { signIn, signUp, resendVerificationEmail, resetPassword, skipAuth } = useAuth();
 
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin');
@@ -210,12 +211,25 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
 
         {/* App Logo & Header */}
         <View style={styles.header}>
-          <View style={[styles.iconCircle, { backgroundColor: theme.primaryLight }]}>
-            <Ionicons name="wallet" size={38} color={theme.primary} />
+          <View
+            style={[
+              styles.logoWrapper,
+              {
+                backgroundColor: theme.surface,
+                borderColor: theme.border,
+                shadowColor: isDark ? '#000000' : '#1E293B',
+              },
+            ]}
+          >
+            <Image
+              source={require('../../assets/icon.png')}
+              style={styles.logoImage}
+              resizeMode="cover"
+            />
           </View>
           <Text style={[styles.appName, { color: theme.text }]}>Finduo</Text>
           <Text style={[styles.appSubtitle, { color: theme.textMuted }]}>
-            Controle financeiro em parceria e tempo real
+            Finanças compartilhadas e individuais
           </Text>
         </View>
 
@@ -495,6 +509,24 @@ const styles = StyleSheet.create({
   header: {
     alignItems: 'center',
     marginBottom: 16,
+  },
+  logoWrapper: {
+    width: 76,
+    height: 76,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 12,
+    elevation: 4,
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+  },
+  logoImage: {
+    width: '100%',
+    height: '100%',
   },
   iconCircle: {
     width: 68,
