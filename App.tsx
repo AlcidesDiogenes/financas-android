@@ -8,13 +8,14 @@ import { BottomBarBadgeProvider } from './src/core/theme/BottomBarBadgeContext';
 import { SwipeActionProvider } from './src/core/theme/SwipeActionContext';
 import { AuthProvider, useAuth } from './src/services/auth/AuthContext';
 import { SecurityProvider } from './src/services/security/SecurityContext';
-import { WorkspaceProvider } from './src/modules/workspaces/WorkspaceContext';
-import { FinanceProvider } from './src/modules/FinanceContext';
+import { WorkspaceProvider, useWorkspace } from './src/modules/workspaces/WorkspaceContext';
+import { FinanceProvider, useFinance } from './src/modules/FinanceContext';
 import { MainNavigator } from './src/navigation/MainNavigator';
 import { AuthScreen } from './src/screens/AuthScreen';
 import { OnboardingScreen, ONBOARDING_COMPLETED_KEY } from './src/screens/OnboardingScreen';
 
 import { WhatsNewModal } from './src/core/components/WhatsNewModal';
+import { AppSplashScreen } from './src/core/components/AppSplashScreen';
 import { ResetPasswordModal } from './src/screens/settings/components/ResetPasswordModal';
 import { ErrorBoundary } from './src/core/components/ErrorBoundary';
 import { APP_VERSION_CONFIG, RELEASE_HISTORY, ReleaseNote } from './src/core/version';
@@ -24,12 +25,26 @@ const LAST_SEEN_VERSION_KEY = '@financas:last_seen_app_version';
 const MainAppContent: React.FC = () => {
   const { isDark } = useTheme();
   const { user } = useAuth();
+  const { isWorkspacesReady } = useWorkspace();
+  const { isFinanceReady } = useFinance();
   const [onboardingDone, setOnboardingDone] = useState<boolean | null>(null);
+  const [minSplashTimeDone, setMinSplashTimeDone] = useState(false);
+  const [splashFinished, setSplashFinished] = useState(false);
 
   // Estados do Modal de Novidades (What's New)
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [previousVersion, setPreviousVersion] = useState<string | null>(null);
   const [relevantReleaseNotes, setRelevantReleaseNotes] = useState<ReleaseNote[]>([]);
+
+  useEffect(() => {
+    // Duração mínima agradável para exibir a marca Finduo (850ms)
+    const timer = setTimeout(() => {
+      setMinSplashTimeDone(true);
+    }, 850);
+    return () => clearTimeout(timer);
+  }, []);
+
+  const isAppReady = Boolean(isWorkspacesReady && isFinanceReady && minSplashTimeDone);
 
   const onboardingKey = user?.id
     ? `@financas:onboarding_v1_0_completed_${user.id}`
@@ -90,7 +105,7 @@ const MainAppContent: React.FC = () => {
   };
 
   if (onboardingDone === null) {
-    return null;
+    return <AppSplashScreen visible={true} />;
   }
 
   if (!onboardingDone) {
@@ -112,6 +127,12 @@ const MainAppContent: React.FC = () => {
         previousVersion={previousVersion}
         releaseNotes={relevantReleaseNotes}
       />
+      {!splashFinished && (
+        <AppSplashScreen
+          visible={!isAppReady}
+          onAnimationFinish={() => setSplashFinished(true)}
+        />
+      )}
     </>
   );
 };
@@ -121,7 +142,7 @@ const ThemedApp: React.FC = () => {
   const { isAuthenticated, isLoading, isPasswordRecovery, setIsPasswordRecovery } = useAuth();
 
   if (isLoading) {
-    return null;
+    return <AppSplashScreen visible={true} />;
   }
 
   return (

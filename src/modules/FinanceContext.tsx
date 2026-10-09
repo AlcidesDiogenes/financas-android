@@ -71,13 +71,15 @@ interface FinanceContextType {
   withdrawGoal: (id: string, amount: number, createTransaction?: boolean) => Promise<void>;
   deleteGoal: (id: string) => Promise<void>;
   reloadAll: () => Promise<void>;
+  isFinanceReady: boolean;
 }
 
 const FinanceContext = createContext<FinanceContextType | undefined>(undefined);
 
 export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  const { activeWorkspace, refreshWorkspaces } = useWorkspace();
+  const { activeWorkspace, refreshWorkspaces, isWorkspacesReady } = useWorkspace();
+  const [isFinanceReady, setIsFinanceReady] = useState(false);
   const currentPeriod = useMemo(() => getCurrentMonthYear(), []);
 
   const [selectedMonth, setSelectedMonth] = useState<number>(currentPeriod.month);
@@ -129,6 +131,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
     setAllBudgets(b);
     setAllGoals(g);
     setAllGoalTransactions(gtx);
+    setIsFinanceReady(true);
 
     // 2. Background cloud pull
     CloudSyncService.syncCloudToLocal().then(async (res) => {
@@ -152,8 +155,10 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
   };
 
   useEffect(() => {
-    reloadAll();
-  }, [user?.id, activeWorkspace?.id]);
+    if (isWorkspacesReady) {
+      reloadAll();
+    }
+  }, [user?.id, activeWorkspace?.id, isWorkspacesReady]);
 
   // Ao voltar do segundo plano: envia pendências da fila e baixa novidades da nuvem
   const reloadAllRef = useRef(reloadAll);
@@ -1040,6 +1045,7 @@ export const FinanceProvider: React.FC<{ children: React.ReactNode }> = ({ child
         withdrawGoal,
         deleteGoal,
         reloadAll,
+        isFinanceReady,
       }}
     >
       {children}

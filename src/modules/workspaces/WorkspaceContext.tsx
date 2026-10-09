@@ -39,6 +39,7 @@ interface WorkspaceContextType {
   currentUserRole: WorkspaceRole;
   canEdit: boolean;
   pendingRequestsCount: number;
+  isWorkspacesReady: boolean;
   refreshWorkspaces: () => Promise<void>;
 }
 
@@ -128,15 +129,230 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
   const [workspaces, setWorkspaces] = useState<Workspace[]>(DEFAULT_WORKSPACES);
   const [activeWorkspaceId, setActiveWorkspaceIdState] = useState<string>(DEFAULT_WORKSPACES[0].id);
   const [defaultWorkspaceId, setDefaultWorkspaceIdState] = useState<string | null>(null);
+  const [isWorkspacesReady, setIsWorkspacesReady] = useState(false);
   const isInitializedRef = useRef(false);
+  const workspacesRef = useRef<Workspace[]>(DEFAULT_WORKSPACES);
+  workspacesRef.current = workspaces;
+  const activeWorkspaceIdRef = useRef<string>(DEFAULT_WORKSPACES[0].id);
+  activeWorkspaceIdRef.current = activeWorkspaceId;
+
+  // Sincronização em nuvem desacoplada e 100% não-bloqueante
+  const syncCloudWorkspaces = async (
+    currentList: Workspace[],
+    personalWsId: string,
+    personalWs: Workspace
+  ) => {
+    if (!user?.email) return;
+
+    try {
+      const client = await SupabaseService.getClient();
+
+      // 1. Assegura o espaço pessoal deste usuário no Supabase
+      try {
+        await client.from('workspaces').upsert(
+          {
+            id: personalWsId,
+            name: personalWs.name,
+            description: personalWs.description,
+            type: 'solo',
+            invite_code: null,
+            created_at: personalWs.createdAt,
+          },
+          { onConflict: 'id', ignoreDuplicates: true }
+        );
+        await client.from('workspace_members').upsert(
+          {
+            id: `mem-${personalWsId}-owner`,
+            workspace_id: personalWsId,
+            email: user.email.toLowerCase().trim(),
+            name: user.name || 'Você',
+            role: 'owner',
+          },
+          { onConflict: 'id', ignoreDuplicates: true }
+        );
+      } catch {}
+
+      // 2. Reenvia espaços cuja criação na nuvem falhou
+      const pendingCloudIds = await WorkspaceRepository.getPendingCloudWorkspaceIds();
+      if (pendingCloudIds.length > 0) {
+        const stillPending: string[] = [];
+        for (const wsId of pendingCloudIds) {
+          const ws = currentList.find((w) => w.id === wsId);
+          if (!ws) continue;
+          if (!(await registerWorkspaceInCloud(ws, user.email, user.name || 'Você'))) {
+            stillPending.push(wsId);
+          }
+        }
+        await WorkspaceRepository.setPendingCloudWorkspaceIds(stillPending);
+      }
+
+      // 3. Busca convites e espaços aos quais o usuário pertence na nuvem
+      const userEmail = user.email.toLowerCase().trim();
+      const { data: memberRows } = await client
+        .from('workspace_members')
+        .select('workspace_id, role, name, email')
+        .eq('email', userEmail);
+
+      if (memberRows) {
+        const approvedCloudWsIds = memberRows
+          .filter((m) => m.role !== 'pending')
+          .map((m) => m.workspace_id)
+          .filter((id) => id !== personalWsId && !id.startsWith('ws-solo'));
+
+        let updatedList = currentList.filter((w) => {
+          if (w.id === personalWsId) return true;
+          const isLocalOwner = w.members.some(
+            (m) =>
+              m.role === 'owner' &&
+              (m.isCurrentUser || (m.email && m.email.toLowerCase().trim() === userEmail))
+          );
+          if (isLocalOwner) return true;
+          return approvedCloudWsIds.includes(w.id);
+        });
+
+        if (approvedCloudWsIds.length > 0) {
+          const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
+            client.from('workspaces').select('*').in('id', approvedCloudWsIds),
+            client.from('workspace_members').select('*').in('workspace_id', approvedCloudWsIds),
+          ]);
+
+          const remoteWorkspaces = remoteWorkspacesRes.data;
+          const allMembers = allMembersRes.data || [];
+
+          if (remoteWorkspaces) {
+            remoteWorkspaces.forEach((rw) => {
+              const alreadyHas = updatedList.some((w) => w.id === rw.id);
+              const wsMembersFromCloud: WorkspaceMember[] = allMembers
+                .filter((m) => m.workspace_id === rw.id)
+                .map((m) => ({
+                  id: m.id,
+                  name: m.name,
+                  email: m.email,
+                  role: m.role as WorkspaceRole,
+                  isCurrentUser: m.email?.toLowerCase().trim() === userEmail,
+                }));
+
+              if (!alreadyHas) {
+                updatedList.push({
+                  id: rw.id,
+                  name: rw.name,
+                  description: rw.description || '',
+                  type: rw.type || 'shared',
+                  inviteCode: rw.invite_code || '',
+                  createdAt: rw.created_at,
+                  members: wsMembersFromCloud,
+                });
+              } else {
+                const existingIdx = updatedList.findIndex((w) => w.id === rw.id);
+                if (existingIdx >= 0 && wsMembersFromCloud.length > 0) {
+                  updatedList[existingIdx] = {
+                    ...updatedList[existingIdx],
+                    members: wsMembersFromCloud,
+                  };
+                }
+              }
+            });
+            await WorkspaceRepository.saveWorkspaces(updatedList);
+          }
+        }
+
+        setWorkspaces(updatedList);
+
+        // PRESERVAÇÃO RIGOROSA: NUNCA retira o usuário do espaço que ele está vendo,
+        // a não ser que esse espaço tenha sido expressamente deletado
+        setActiveWorkspaceIdState((currentId) => {
+          if (currentId && updatedList.some((w) => w.id === currentId)) {
+            return currentId;
+          }
+          return updatedList[0]?.id || personalWsId;
+        });
+      }
+    } catch {}
+  };
+
+  const loadWorkspaces = async () => {
+    // 1. Modo offline / deslogado
+    if (!user) {
+      const soloList = [createDefaultPersonalWorkspace()];
+      setWorkspaces(soloList);
+      setActiveWorkspaceIdState(soloList[0].id);
+      setIsWorkspacesReady(true);
+      return;
+    }
+
+    const personalWsId = getPersonalWorkspaceId(user.id);
+    const personalWs = createDefaultPersonalWorkspace(user.id, user.name, user.email);
+
+    // 2. Carga Local Imediata (< 5ms via AsyncStorage)
+    const [rawList, savedDefaultId, rawActiveId] = await Promise.all([
+      WorkspaceRepository.getWorkspaces(),
+      WorkspaceRepository.getDefaultWorkspaceId(),
+      WorkspaceRepository.getActiveWorkspaceId(),
+    ]);
+
+    const otherWorkspaces = rawList.filter((w) => w.id !== 'ws-solo' && w.id !== personalWsId);
+    const localList: Workspace[] = [personalWs, ...otherWorkspaces];
+
+    const effectiveDefaultId = savedDefaultId === 'ws-solo' ? personalWsId : savedDefaultId;
+    const effectiveActiveId = rawActiveId === 'ws-solo' ? personalWsId : rawActiveId;
+
+    if (savedDefaultId === 'ws-solo') {
+      WorkspaceRepository.setDefaultWorkspaceId(personalWsId).catch(() => {});
+    }
+
+    const isInitialBoot = !isInitializedRef.current;
+    isInitializedRef.current = true;
+
+    // 3. Escolha Precisa do Espaço Ativo:
+    let targetId: string;
+    if (isInitialBoot) {
+      // Boot Frio: PRIORIDADE MÁXIMA para o Espaço Padrão configurado pelo usuário!
+      if (effectiveDefaultId && localList.some((w) => w.id === effectiveDefaultId)) {
+        targetId = effectiveDefaultId;
+      } else if (effectiveActiveId && localList.some((w) => w.id === effectiveActiveId)) {
+        targetId = effectiveActiveId;
+      } else {
+        targetId = localList[0]?.id || personalWsId;
+      }
+      WorkspaceRepository.setActiveWorkspaceId(targetId).catch(() => {});
+    } else {
+      // Durante o ciclo de vida vivo: preservar o espaço atual
+      targetId = activeWorkspaceIdRef.current;
+      if (!localList.some((w) => w.id === targetId)) {
+        targetId = (effectiveDefaultId && localList.some((w) => w.id === effectiveDefaultId))
+          ? effectiveDefaultId
+          : (localList[0]?.id || personalWsId);
+        WorkspaceRepository.setActiveWorkspaceId(targetId).catch(() => {});
+      }
+    }
+
+    // APLICA IMEDIATAMENTE NO REACT SEM ESPERAR INTERNET
+    setWorkspaces(localList);
+    setDefaultWorkspaceIdState(effectiveDefaultId);
+    setActiveWorkspaceIdState(targetId);
+    setIsWorkspacesReady(true);
+
+    // Migra e salva cache local em background
+    migrateLocalSoloData(personalWsId).catch(() => {});
+    WorkspaceRepository.saveWorkspaces(localList).catch(() => {});
+
+    // 4. Sincronização Remota Silenciosa em Background (NÃO BLOQUEANTE)
+    syncCloudWorkspaces(localList, personalWsId, personalWs).catch(() => {});
+  };
 
   useEffect(() => {
     loadWorkspaces();
 
-    // Atualiza espaços e solicitações pendentes ao voltar para o app
+    // Ao voltar do segundo plano: sincronização silenciosa sem mexer no espaço atual
     const subscription = AppState.addEventListener('change', (nextState) => {
       if (nextState === 'active') {
-        loadWorkspaces();
+        if (isInitializedRef.current && user) {
+          const personalWsId = getPersonalWorkspaceId(user.id);
+          const personalWs = createDefaultPersonalWorkspace(user.id, user.name, user.email);
+          syncCloudWorkspaces(workspacesRef.current, personalWsId, personalWs).catch(() => {});
+        } else {
+          loadWorkspaces();
+        }
       }
     });
 
@@ -144,7 +360,9 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
     let timer: ReturnType<typeof setInterval> | null = null;
     if (user?.id) {
       timer = setInterval(() => {
-        loadWorkspaces();
+        const personalWsId = getPersonalWorkspaceId(user.id);
+        const personalWs = createDefaultPersonalWorkspace(user.id, user.name, user.email);
+        syncCloudWorkspaces(workspacesRef.current, personalWsId, personalWs).catch(() => {});
       }, 20000);
     }
 
@@ -153,183 +371,6 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
       if (timer) clearInterval(timer);
     };
   }, [user?.id, user?.email]);
-
-  const loadWorkspaces = async () => {
-    const isInitialBoot = !isInitializedRef.current;
-    isInitializedRef.current = true;
-
-    // No modo offline, permite apenas o espaço pessoal solo
-    if (!user) {
-      const soloList = [createDefaultPersonalWorkspace()];
-      setWorkspaces(soloList);
-      setActiveWorkspaceIdState(soloList[0].id);
-      return;
-    }
-
-    const personalWsId = getPersonalWorkspaceId(user.id);
-    let list = await WorkspaceRepository.getWorkspaces();
-
-    // 1. Assegura que o espaço pessoal do usuário autenticado é ws-${user.id} e privado
-    const personalWs = createDefaultPersonalWorkspace(user.id, user.name, user.email);
-
-    // Filtra apenas o 'ws-solo' genérico legado
-    // Mantém o espaço pessoal principal E todos os outros espaços criados pelo usuário
-    const otherWorkspaces = list.filter((w) => w.id !== 'ws-solo' && w.id !== personalWsId);
-    list = [personalWs, ...otherWorkspaces];
-
-    // Migra itens locais que estavam vinculados ao antigo 'ws-solo' para o personalWsId deste usuário
-    await migrateLocalSoloData(personalWsId);
-    await WorkspaceRepository.saveWorkspaces(list);
-
-    // Registra/garante o espaço pessoal deste usuário no Supabase
-    try {
-      const client = await SupabaseService.getClient();
-      await client.from('workspaces').upsert({
-        id: personalWsId,
-        name: personalWs.name,
-        description: personalWs.description,
-        type: 'solo',
-        invite_code: null,
-        created_at: personalWs.createdAt,
-      });
-      await client.from('workspace_members').upsert({
-        id: `mem-${personalWsId}-owner`,
-        workspace_id: personalWsId,
-        email: user.email.toLowerCase().trim(),
-        name: user.name || 'Você',
-        role: 'owner',
-      });
-    } catch {}
-
-    // Reenvia espaços cuja criação na nuvem falhou (ex.: criados sem internet)
-    const pendingCloudIds = await WorkspaceRepository.getPendingCloudWorkspaceIds();
-    if (pendingCloudIds.length > 0) {
-      const stillPending: string[] = [];
-      for (const wsId of pendingCloudIds) {
-        const ws = list.find((w) => w.id === wsId);
-        if (!ws) continue; // excluído localmente: nada a enviar
-        if (!(await registerWorkspaceInCloud(ws, user.email, user.name || 'Você'))) {
-          stillPending.push(wsId);
-        }
-      }
-      await WorkspaceRepository.setPendingCloudWorkspaceIds(stillPending);
-    }
-
-    // 2. Busca convites e espaços no Supabase
-    if (user?.email) {
-      try {
-        const client = await SupabaseService.getClient();
-        const userEmail = user.email.toLowerCase().trim();
-        const { data: memberRows } = await client
-          .from('workspace_members')
-          .select('workspace_id, role, name, email')
-          .eq('email', userEmail);
-
-        if (memberRows) {
-          // Filtra espaços aos quais o usuário pertence na nuvem e já foi aprovado
-          const approvedCloudWsIds = memberRows
-            .filter((m) => m.role !== 'pending')
-            .map((m) => m.workspace_id)
-            .filter((id) => id !== personalWsId && !id.startsWith('ws-solo'));
-
-          // Remove da lista local apenas espaços de TERCEIROS dos quais o usuário foi removido/rejeitado
-          // NUNCA remove espaços criados localmente pelo próprio usuário onde ele é o proprietário (owner)!
-          list = list.filter((w) => {
-            if (w.id === personalWsId) return true;
-            const isLocalOwner = w.members.some(
-              (m) =>
-                m.role === 'owner' &&
-                (m.isCurrentUser || (m.email && m.email.toLowerCase().trim() === userEmail))
-            );
-            if (isLocalOwner) return true;
-            return approvedCloudWsIds.includes(w.id);
-          });
-
-          if (approvedCloudWsIds.length > 0) {
-            const [remoteWorkspacesRes, allMembersRes] = await Promise.all([
-              client.from('workspaces').select('*').in('id', approvedCloudWsIds),
-              client.from('workspace_members').select('*').in('workspace_id', approvedCloudWsIds),
-            ]);
-
-            const remoteWorkspaces = remoteWorkspacesRes.data;
-            const allMembers = allMembersRes.data || [];
-
-            if (remoteWorkspaces) {
-              remoteWorkspaces.forEach((rw) => {
-                const alreadyHas = list.some((w) => w.id === rw.id);
-                const wsMembersFromCloud: WorkspaceMember[] = allMembers
-                  .filter((m) => m.workspace_id === rw.id)
-                  .map((m) => ({
-                    id: m.id,
-                    name: m.name,
-                    email: m.email,
-                    role: m.role as WorkspaceRole,
-                    isCurrentUser: m.email?.toLowerCase().trim() === userEmail,
-                  }));
-
-                if (!alreadyHas) {
-                  list.push({
-                    id: rw.id,
-                    name: rw.name,
-                    description: rw.description || '',
-                    type: rw.type || 'shared',
-                    inviteCode: rw.invite_code || '',
-                    createdAt: rw.created_at,
-                    members: wsMembersFromCloud,
-                  });
-                } else {
-                  // Atualiza lista de membros do espaço já existente
-                  const existingIdx = list.findIndex((w) => w.id === rw.id);
-                  if (existingIdx >= 0 && wsMembersFromCloud.length > 0) {
-                    list[existingIdx] = {
-                      ...list[existingIdx],
-                      members: wsMembersFromCloud,
-                    };
-                  }
-                }
-              });
-              await WorkspaceRepository.saveWorkspaces(list);
-            }
-          }
-        }
-      } catch {}
-    }
-
-    setWorkspaces(list);
-
-    // Carrega o espaço padrão configurado pelo usuário
-    const savedDefaultId = await WorkspaceRepository.getDefaultWorkspaceId();
-    const effectiveDefaultId = savedDefaultId === 'ws-solo' ? personalWsId : savedDefaultId;
-    if (savedDefaultId === 'ws-solo') {
-      await WorkspaceRepository.setDefaultWorkspaceId(personalWsId);
-    }
-    setDefaultWorkspaceIdState(effectiveDefaultId);
-
-    // PRESERVAÇÃO RIGOROSA DO ESPAÇO ATIVO:
-    // O usuário NUNCA deve ser retirado do espaço em que está navegando no momento!
-    const rawActiveId = await WorkspaceRepository.getActiveWorkspaceId();
-    const effectiveActiveId = rawActiveId === 'ws-solo' ? personalWsId : rawActiveId;
-
-    setActiveWorkspaceIdState((currentId) => {
-      // 1. Se o espaço em que o usuário está atualmente na memória continua existindo na lista, MANTENHA-O!
-      if (currentId && list.some((w) => w.id === currentId)) {
-        return currentId;
-      }
-      // 2. Se o espaço ativo persistido no armazenamento local existe na lista, mantenha-o!
-      if (effectiveActiveId && list.some((w) => w.id === effectiveActiveId)) {
-        return effectiveActiveId;
-      }
-      // 3. APENAS na primeira inicialização do app (boot frio): se houver um padrão definido, use-o
-      if (isInitialBoot && effectiveDefaultId && list.some((w) => w.id === effectiveDefaultId)) {
-        WorkspaceRepository.setActiveWorkspaceId(effectiveDefaultId).catch(() => {});
-        return effectiveDefaultId;
-      }
-      // 4. Fallback seguro para o primeiro espaço da lista
-      const fallbackId = list[0]?.id || personalWsId;
-      WorkspaceRepository.setActiveWorkspaceId(fallbackId).catch(() => {});
-      return fallbackId;
-    });
-  };
 
   const activeWorkspace =
     workspaces.find((w) => w.id === activeWorkspaceId) || workspaces[0] || DEFAULT_WORKSPACES[0];
@@ -881,6 +922,7 @@ export const WorkspaceProvider: React.FC<{ children: React.ReactNode }> = ({ chi
         currentUserRole,
         canEdit,
         pendingRequestsCount,
+        isWorkspacesReady,
         refreshWorkspaces: loadWorkspaces,
       }}
     >
