@@ -213,9 +213,9 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
           <View style={[styles.iconCircle, { backgroundColor: theme.primaryLight }]}>
             <Ionicons name="wallet" size={38} color={theme.primary} />
           </View>
-          <Text style={[styles.appName, { color: theme.text }]}>Finanças</Text>
+          <Text style={[styles.appName, { color: theme.text }]}>Finduo</Text>
           <Text style={[styles.appSubtitle, { color: theme.textMuted }]}>
-            Controle pessoal e colaborativo em tempo real
+            Controle financeiro em parceria e tempo real
           </Text>
         </View>
 
@@ -421,7 +421,7 @@ export const AuthScreen: React.FC<AuthScreenProps> = ({ onClose }) => {
               )}
 
               <Button
-                title={mode === 'signin' ? 'Entrar no Finanças' : 'Criar Minha Conta'}
+                title={mode === 'signin' ? 'Entrar no Finduo' : 'Criar Minha Conta'}
                 loading={loading}
                 onPress={handleAction}
                 style={{ marginTop: 16 }}

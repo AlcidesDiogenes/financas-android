@@ -85,7 +85,7 @@ export const ResetPasswordModal: React.FC<ResetPasswordModalProps> = ({
       if (res.success) {
         Alert.alert(
           'Senha Redefinida! 🎉',
-          'Sua nova senha foi cadastrada com sucesso. Você já está conectado ao Finanças!',
+          'Sua nova senha foi cadastrada com sucesso. Você já está conectado ao Finduo!',
           [{ text: 'Continuar', onPress: handleClose }]
         );
       } else {

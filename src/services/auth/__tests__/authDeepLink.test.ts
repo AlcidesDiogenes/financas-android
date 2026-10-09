@@ -2,6 +2,11 @@ import { extractUrlParams, parseAuthDeepLink } from '../authDeepLink';
 
 describe('parseAuthDeepLink', () => {
   it('aceita o código PKCE de confirmação de cadastro', () => {
+    expect(parseAuthDeepLink('finduo://auth/confirm?code=abc-123')).toEqual({
+      kind: 'code',
+      isRecovery: false,
+      code: 'abc-123',
+    });
     expect(parseAuthDeepLink('financas://auth/confirm?code=abc-123')).toEqual({
       kind: 'code',
       isRecovery: false,
@@ -10,6 +15,11 @@ describe('parseAuthDeepLink', () => {
   });
 
   it('reconhece o link de recuperação de senha', () => {
+    expect(parseAuthDeepLink('finduo://auth/reset-password?code=xyz')).toEqual({
+      kind: 'code',
+      isRecovery: true,
+      code: 'xyz',
+    });
     expect(parseAuthDeepLink('financas://auth/reset-password?code=xyz')).toEqual({
       kind: 'code',
       isRecovery: true,
