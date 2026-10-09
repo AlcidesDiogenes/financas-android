@@ -69,6 +69,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [updateDownloadProgress, setUpdateDownloadProgress] = useState(0);
   const [updateStatusText, setUpdateStatusText] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
+  const [updateErrorDetails, setUpdateErrorDetails] = useState<string | undefined>(undefined);
   const [isReloadingApp, setIsReloadingApp] = useState(false);
 
   // Modais de Senha, Perfil e Transferência
@@ -163,6 +164,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   // Verificação e Download de Atualizações Online (OTA Updates)
   const handleCheckForUpdates = async () => {
     setUpdateErrorMessage('');
+    setUpdateErrorDetails(undefined);
     setUpdateStep('checking');
     setShowUpdateModal(true);
     setIsCheckingUpdate(true);
@@ -173,7 +175,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       if (!Updates.isEnabled) {
         setUpdateStep('error');
         setUpdateErrorMessage(
-          'O serviço de atualizações online (OTA) só funciona no APK instalado no aparelho (fora do Expo Go ou modo de desenvolvimento local).'
+          'O serviço de atualizações online (OTA) só funciona no APK instalado no aparelho.'
+        );
+        setUpdateErrorDetails(
+          'Ambiente de execução atual: Expo Go ou Desenvolvimento Local.\nO módulo de atualizações automáticas via nuvem (EAS Update) requer um build standalone instalado.'
         );
         return;
       }
@@ -207,15 +212,12 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
     } catch (err: any) {
       const msg = err?.message || '';
       setUpdateStep('error');
-      if (msg.includes('network') || msg.includes('Failed to fetch') || msg.includes('connection')) {
-        setUpdateErrorMessage(
-          'Não foi possível conectar ao servidor de atualizações. Verifique se o seu celular está conectado à internet (Wi-Fi ou dados móveis).'
-        );
-      } else {
-        setUpdateErrorMessage(
-          `Não foi possível checar atualizações no momento.\n\nDetalhes:\nCanal do App: "${Updates.channel || 'nenhum'}"\nRuntime: "${Updates.runtimeVersion || 'padrão'}"\nErro: ${msg}`
-        );
-      }
+      setUpdateErrorMessage(
+        'Não foi possível checar atualizações no momento. Verifique sua conexão com a internet e tente novamente.'
+      );
+      setUpdateErrorDetails(
+        `Canal do App: "${Updates.channel || 'nenhum'}"\nRuntime: "${Updates.runtimeVersion || 'padrão'}"\nErro: ${msg}`
+      );
     } finally {
       setIsCheckingUpdate(false);
       setStatusMessage('');
@@ -297,7 +299,10 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       clearInterval(downloadInterval);
       setUpdateStep('error');
       setUpdateErrorMessage(
-        `Não foi possível concluir o download da atualização:\n${downloadErr?.message || 'Verifique sua conexão com a internet e tente novamente.'}`
+        'Não foi possível concluir o download da atualização. Verifique sua conexão com a internet e tente novamente.'
+      );
+      setUpdateErrorDetails(
+        `Falha durante o download dos arquivos:\n${downloadErr?.message || 'Erro desconhecido'}`
       );
     }
   };
@@ -981,6 +986,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         downloadProgress={updateDownloadProgress}
         statusText={updateStatusText}
         errorMessage={updateErrorMessage}
+        errorDetails={updateErrorDetails}
         currentVersion={getAppVersionString()}
         isReloadingApp={isReloadingApp}
         onStartUpdate={handleStartUpdateDownload}

@@ -1,10 +1,13 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
   Modal,
   StyleSheet,
   ActivityIndicator,
+  TouchableOpacity,
+  ScrollView,
+  Platform,
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../core/theme/ThemeContext';
@@ -27,6 +30,7 @@ interface OTAUpdateModalProps {
   downloadProgress: number;
   statusText?: string;
   errorMessage?: string;
+  errorDetails?: string;
   currentVersion?: string;
   isReloadingApp: boolean;
   onStartUpdate: () => void;
@@ -42,6 +46,7 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
   downloadProgress,
   statusText,
   errorMessage,
+  errorDetails,
   currentVersion,
   isReloadingApp,
   onStartUpdate,
@@ -50,6 +55,29 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
   onClose,
 }) => {
   const { theme, isDark } = useTheme();
+  const [showTechnicalDetails, setShowTechnicalDetails] = useState(false);
+
+  useEffect(() => {
+    if (!visible || step !== 'error') {
+      setShowTechnicalDetails(false);
+    }
+  }, [visible, step]);
+
+  // Separa mensagem amigável para o usuário dos detalhes técnicos brutos
+  let friendlyErrorMessage = errorMessage;
+  let technicalDetails = errorDetails;
+
+  if (errorMessage && errorMessage.includes('Detalhes:')) {
+    const parts = errorMessage.split(/Detalhes:\s*/i);
+    friendlyErrorMessage = parts[0]?.trim();
+    if (!technicalDetails && parts[1]) {
+      technicalDetails = parts[1].trim();
+    }
+  }
+
+  if (step === 'error' && (!friendlyErrorMessage || friendlyErrorMessage.trim() === '')) {
+    friendlyErrorMessage = 'Não foi possível checar atualizações no momento. Verifique sua conexão com a internet e tente novamente.';
+  }
 
   return (
     <>
@@ -152,8 +180,60 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                 ? (statusText || 'Processando atualização...')
                 : step === 'ready'
                 ? 'Os novos arquivos foram instalados. Reinicie o aplicativo para ver as novidades imediatamente.'
-                : (errorMessage || 'Ocorreu uma falha ao buscar atualizações. Verifique sua conexão com a internet e tente novamente.')}
+                : friendlyErrorMessage}
             </Text>
+
+            {/* BOTÃO E CONTAINER DE DETALHES TÉCNICOS ("VER MAIS") */}
+            {step === 'error' && !!technicalDetails && (
+              <View style={styles.technicalDetailsSection}>
+                <TouchableOpacity
+                  style={[
+                    styles.detailsToggleBtn,
+                    { backgroundColor: isDark ? '#1E293B' : '#F1F5F9' },
+                  ]}
+                  onPress={() => setShowTechnicalDetails((prev) => !prev)}
+                  activeOpacity={0.7}
+                >
+                  <Text style={[styles.detailsToggleText, { color: theme.textMuted }]}>
+                    {showTechnicalDetails ? 'Ocultar detalhes' : 'Ver mais'}
+                  </Text>
+                  <Ionicons
+                    name={showTechnicalDetails ? 'chevron-up' : 'chevron-down'}
+                    size={14}
+                    color={theme.textMuted}
+                    style={{ marginLeft: 5 }}
+                  />
+                </TouchableOpacity>
+
+                {showTechnicalDetails && (
+                  <View
+                    style={[
+                      styles.technicalDetailsBox,
+                      {
+                        backgroundColor: isDark ? '#0F172A' : '#F8FAFC',
+                        borderColor: isDark ? '#334155' : '#E2E8F0',
+                      },
+                    ]}
+                  >
+                    <ScrollView
+                      style={styles.technicalDetailsScroll}
+                      nestedScrollEnabled
+                      showsVerticalScrollIndicator={true}
+                    >
+                      <Text
+                        style={[
+                          styles.technicalDetailsContent,
+                          { color: isDark ? '#94A3B8' : '#64748B' },
+                        ]}
+                        selectable
+                      >
+                        {technicalDetails}
+                      </Text>
+                    </ScrollView>
+                  </View>
+                )}
+              </View>
+            )}
 
             {/* AVISO DE MANTER TELA LIGADA (EM DISPONÍVEL, BAIXANDO E INSTALANDO) */}
             {(step === 'available' || step === 'downloading' || step === 'installing') && (
@@ -259,7 +339,8 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
 
               {step === 'ready' && (
                 <Button
-                  title="Reiniciar Aplicativo Agora 🚀"
+                  title="Reiniciar Aplicativo Agora"
+                  icon={<Ionicons name="rocket-outline" size={18} color="#FFF" />}
                   onPress={onRestartApp}
                   style={{ width: '100%' }}
                 />
@@ -340,6 +421,39 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginBottom: 16,
     paddingHorizontal: 8,
+  },
+  technicalDetailsSection: {
+    width: '100%',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  detailsToggleBtn: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 6,
+    paddingHorizontal: 14,
+    borderRadius: 16,
+  },
+  detailsToggleText: {
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  technicalDetailsBox: {
+    width: '100%',
+    marginTop: 10,
+    padding: 12,
+    borderRadius: 12,
+    borderWidth: 1,
+    maxHeight: 130,
+  },
+  technicalDetailsScroll: {
+    maxHeight: 106,
+  },
+  technicalDetailsContent: {
+    fontSize: 11,
+    lineHeight: 16,
+    fontFamily: Platform.OS === 'ios' ? 'Menlo' : 'monospace',
   },
   screenOnAlertBox: {
     flexDirection: 'row',
