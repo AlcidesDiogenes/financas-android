@@ -9,6 +9,7 @@ import {
 import { Ionicons } from '@expo/vector-icons';
 import { useTheme } from '../../../core/theme/ThemeContext';
 import { Button } from '../../../core/components/Button';
+import { AppSplashScreen } from '../../../core/components/AppSplashScreen';
 
 export type OTAUpdateStep =
   | 'checking'
@@ -146,7 +147,7 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                     ? `Você já está utilizando a versão mais recente (${currentVersion}). Nenhuma atualização pendente.`
                     : 'Você já está utilizando a versão mais recente. Nenhuma atualização pendente.')
                 : step === 'available'
-                ? 'Uma nova versão do Finanças com melhorias de velocidade, correções e novidades já está pronta para você.'
+                ? 'Uma nova versão do Finduo com melhorias de velocidade, correções e novidades já está pronta para você.'
                 : step === 'downloading' || step === 'installing'
                 ? (statusText || 'Processando atualização...')
                 : step === 'ready'
@@ -286,18 +287,12 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
         </View>
       </Modal>
 
-      {/* OVERLAY DE TRANSIÇÃO SUAVE DE REINÍCIO (SPLASH) */}
+      {/* OVERLAY DE TRANSIÇÃO SUAVE DE REINÍCIO (SPLASH OFICIAL FINDUO) */}
       {isReloadingApp && (
-        <View style={[styles.relaunchSplashOverlay, { backgroundColor: theme.background }]}>
-          <View style={[styles.relaunchLogoCircle, { backgroundColor: theme.primary }]}>
-            <Ionicons name="wallet" size={44} color="#FFF" />
-          </View>
-          <Text style={[styles.relaunchTitle, { color: theme.text }]}>Finanças</Text>
-          <Text style={[styles.relaunchSubtitle, { color: theme.textMuted }]}>
-            Aplicando atualizações e reiniciando...
-          </Text>
-          <ActivityIndicator size="large" color={theme.primary} style={{ marginTop: 24 }} />
-        </View>
+        <AppSplashScreen
+          visible={true}
+          statusText="Aplicando atualizações e reiniciando o Finduo..."
+        />
       )}
     </>
   );
