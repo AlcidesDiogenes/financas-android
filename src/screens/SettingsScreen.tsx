@@ -39,6 +39,7 @@ import { ChangePasswordModal } from './settings/components/ChangePasswordModal';
 import { EditProfileModal } from './settings/components/EditProfileModal';
 import { TransferOwnershipModal, PendingWorkspaceTransfer } from './settings/components/TransferOwnershipModal';
 import { FeedbackModal } from '../core/components/FeedbackModal';
+import { checkInternetConnectivity } from '../core/utils/network';
 import { Ionicons } from '@expo/vector-icons';
 
 interface SettingsScreenProps {
@@ -70,6 +71,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const [updateStatusText, setUpdateStatusText] = useState('');
   const [updateErrorMessage, setUpdateErrorMessage] = useState('');
   const [updateErrorDetails, setUpdateErrorDetails] = useState<string | undefined>(undefined);
+  const [updateErrorType, setUpdateErrorType] = useState<'offline' | 'server' | 'generic'>('generic');
   const [isReloadingApp, setIsReloadingApp] = useState(false);
 
   // Modais de Senha, Perfil e Transferência
@@ -165,6 +167,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
   const handleCheckForUpdates = async () => {
     setUpdateErrorMessage('');
     setUpdateErrorDetails(undefined);
+    setUpdateErrorType('generic');
     setUpdateStep('checking');
     setShowUpdateModal(true);
     setIsCheckingUpdate(true);
@@ -174,6 +177,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
       // Verifica se o expo-updates está habilitado no ambiente (build nativo/APK)
       if (!Updates.isEnabled) {
         setUpdateStep('error');
+        setUpdateErrorType('generic');
         setUpdateErrorMessage(
           'O serviço de atualizações online (OTA) só funciona no APK instalado no aparelho.'
         );
@@ -212,11 +216,24 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
     } catch (err: any) {
       const msg = err?.message || '';
       setUpdateStep('error');
-      setUpdateErrorMessage(
-        'Não foi possível checar atualizações no momento. Verifique sua conexão com a internet e tente novamente.'
-      );
+
+      // Diagnóstico inteligente de conectividade
+      const isOnline = await checkInternetConnectivity();
+
+      if (!isOnline) {
+        setUpdateErrorType('offline');
+        setUpdateErrorMessage(
+          'Você está sem conexão com a internet. Verifique seu Wi-Fi ou dados móveis e tente novamente.'
+        );
+      } else {
+        setUpdateErrorType('server');
+        setUpdateErrorMessage(
+          'O serviço de atualizações está temporariamente indisponível ou demorou a responder. Tente novamente em alguns instantes.'
+        );
+      }
+
       setUpdateErrorDetails(
-        `Canal do App: "${Updates.channel || 'nenhum'}"\nRuntime: "${Updates.runtimeVersion || 'padrão'}"\nErro: ${msg}`
+        `Diagnóstico de Rede: ${isOnline ? 'Conectado à internet (Online)' : 'Sem conexão com a internet (Offline)'}\nCanal do App: "${Updates.channel || 'nenhum'}"\nRuntime: "${Updates.runtimeVersion || 'padrão'}"\nDetalhes do Erro: ${msg}`
       );
     } finally {
       setIsCheckingUpdate(false);
@@ -298,11 +315,23 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
     } catch (downloadErr: any) {
       clearInterval(downloadInterval);
       setUpdateStep('error');
-      setUpdateErrorMessage(
-        'Não foi possível concluir o download da atualização. Verifique sua conexão com a internet e tente novamente.'
-      );
+
+      const isOnline = await checkInternetConnectivity();
+
+      if (!isOnline) {
+        setUpdateErrorType('offline');
+        setUpdateErrorMessage(
+          'A conexão com a internet caiu durante o download da atualização. Verifique sua rede e tente novamente.'
+        );
+      } else {
+        setUpdateErrorType('server');
+        setUpdateErrorMessage(
+          'Não foi possível concluir o download dos arquivos devido a uma instabilidade no servidor. Tente novamente em alguns instantes.'
+        );
+      }
+
       setUpdateErrorDetails(
-        `Falha durante o download dos arquivos:\n${downloadErr?.message || 'Erro desconhecido'}`
+        `Diagnóstico de Rede: ${isOnline ? 'Conectado à internet (Online)' : 'Sem conexão com a internet (Offline)'}\nFalha durante o download dos arquivos:\n${downloadErr?.message || 'Erro desconhecido'}`
       );
     }
   };
@@ -983,6 +1012,7 @@ export const SettingsScreen: React.FC<SettingsScreenProps> = ({ onNavigateToWork
         visible={showUpdateModal}
         step={updateStep}
         stage={updateStage}
+        errorType={updateErrorType}
         downloadProgress={updateDownloadProgress}
         statusText={updateStatusText}
         errorMessage={updateErrorMessage}

@@ -27,6 +27,7 @@ interface OTAUpdateModalProps {
   visible: boolean;
   step: OTAUpdateStep;
   stage?: 'download' | 'install' | 'ready';
+  errorType?: 'offline' | 'server' | 'generic';
   downloadProgress: number;
   statusText?: string;
   errorMessage?: string;
@@ -43,6 +44,7 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
   visible,
   step,
   stage,
+  errorType = 'generic',
   downloadProgress,
   statusText,
   errorMessage,
@@ -130,6 +132,10 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                         ? 'cloud-download'
                         : step === 'available'
                         ? 'rocket'
+                        : errorType === 'offline'
+                        ? 'cloud-offline'
+                        : errorType === 'server'
+                        ? 'server-outline'
                         : 'alert-circle'
                     }
                     size={38}
@@ -163,6 +169,8 @@ export const OTAUpdateModal: React.FC<OTAUpdateModalProps> = ({
                 ? 'Instalando Atualização...'
                 : step === 'ready'
                 ? 'Atualização Pronta!'
+                : errorType === 'offline'
+                ? 'Sem Conexão com a Internet'
                 : 'Não Foi Possível Atualizar'}
             </Text>
 
