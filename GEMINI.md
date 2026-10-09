@@ -43,6 +43,8 @@
 - **Tema Dinâmico:** Sempre consumir cores e tokens via `useTheme()` (`theme.background`, `theme.card`, `theme.primary`, `theme.text`, etc.).
 - **Gesto e Animações:** Usar `Animated` nativo da `react-native`. Ações de swipe (arrastar para pagar/excluir) devem ter tolerância calibrada e retorno suave com mola.
 - **Sem Drag-and-Drop em Listas com Scroll:** As listas devem manter ordenação cronológica ou natural previsível (ex: dia de vencimento `dueDay`), evitando conflitos entre `PanResponder` e `ScrollView`.
+- **Ícones Vetoriais vs. Emojis em Botões:** NUNCA utilizar emojis (ex: 🚀, 💾, ✅) dentro do texto (`title` ou `Text`) de botões de ação ou componentes clicáveis. Sempre utilizar ícones vetoriais padronizados do `@expo/vector-icons` (`Ionicons`), garantindo consistência visual e renderização idêntica em qualquer fabricante/versão do Android.
+- **Tratamento Humanizado de Erros e Logs Ocultos:** Modais e alertas de erro NUNCA devem exibir mensagens técnicas brutas, stack traces ou rejeições de promises diretamente na tela principal do usuário. Devem apresentar uma mensagem amigável e compreensível em primeiro plano (ex: diagnóstico de falta de internet ou instabilidade temporária do servidor via `checkInternetConnectivity`) e disponibilizar detalhes técnicos exclusivamente através de um botão expansível "Ver mais" / "Ocultar detalhes".
 
 ### Comandos Essenciais
 ```bash
